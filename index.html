@@ -2326,7 +2326,86 @@ create table if not exists deals (id text primary key, data jsonb not null, upda
   window.addEventListener('load', ()=>{ try{ obs.observe(document.body, {childList:true, subtree:true}); setTimeout(()=>obs.disconnect(), 8000); }catch(_){} });
 })();
 </script>
+
+<script>
+// OPTIMA - Add Birth Date + Job (Optional) - No design change, only 2 extra fields
+(function(){
+  function getExtra(){ try{ return JSON.parse(localStorage.getItem('optima_extra_client_data')||'{}'); }catch(e){ return {}; } }
+  function saveExtra(phone, dob, job){
+    if(!phone) return;
+    const all = getExtra();
+    all[phone] = {dob: dob||'', job: job||'', updatedAt: Date.now()};
+    localStorage.setItem('optima_extra_client_data', JSON.stringify(all));
+    // Also push to Firebase so it syncs across devices
+    try{
+      fetch('https://optima-crm-6b76d-default-rtdb.firebaseio.com/optima_extra.json', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(all)}).catch(()=>{});
+    }catch(e){}
+  }
+  function inject(){
+    // Find Add Lead form - look for inputs with placeholder containing phone or name
+    const inputs = Array.from(document.querySelectorAll('input'));
+    const phoneInput = inputs.find(i=> (i.placeholder||'').toLowerCase().includes('phone') || (i.placeholder||'').includes('010'));
+    if(!phoneInput) return;
+    const form = phoneInput.closest('form') || phoneInput.parentElement.parentElement;
+    if(!form || form.dataset.extraInjected) return;
+    form.dataset.extraInjected = '1';
+    // Create 2 fields
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px';
+    wrap.innerHTML = `
+      <div><label style="font-size:13px;font-weight:700">Date of Birth <span style="font-weight:400;color:#aaa">(Optional)</span></label><input id="optima-dob" type="date" style="width:100%;padding:10px;border-radius:8px;border:1px solid #3D3E40;background:#121621;color:#fff;margin-top:4px"></div>
+      <div><label style="font-size:13px;font-weight:700">Job / Occupation <span style="font-weight:400;color:#aaa">(Optional)</span></label><input id="optima-job" type="text" placeholder="e.g. Doctor, Engineer..." style="width:100%;padding:10px;border-radius:8px;border:1px solid #3D3E40;background:#121621;color:#fff;margin-top:4px"></div>
+    `;
+    // Insert before the Save button if found
+    const btns = Array.from(form.querySelectorAll('button'));
+    const saveBtn = btns.find(b=> b.textContent.toLowerCase().includes('save') || b.textContent.includes('حفظ') || b.textContent.toLowerCase().includes('add lead'));
+    if(saveBtn) form.insertBefore(wrap, saveBtn);
+    else form.appendChild(wrap);
+    // On save, capture
+    if(saveBtn){
+      saveBtn.addEventListener('click', ()=>{
+        setTimeout(()=>{
+          const dob = document.getElementById('optima-dob')?.value || '';
+          const job = document.getElementById('optima-job')?.value || '';
+          const ph = phoneInput.value || '';
+          if(ph && (dob || job)) saveExtra(ph, dob, job);
+          // Clear after save
+          const dEl = document.getElementById('optima-dob'); if(dEl) dEl.value='';
+          const jEl = document.getElementById('optima-job'); if(jEl) jEl.value='';
+        }, 500);
+      });
+    }
+  }
+  // Also show extra data in lead detail - when user clicks a lead row, show dob/job if exists
+  document.addEventListener('click', (e)=>{
+    const row = e.target.closest('tr');
+    if(row){
+      setTimeout(()=>{
+        const cells = row.querySelectorAll('td');
+        if(cells.length>=2){
+          const phone = cells[1]?.textContent?.trim();
+          if(phone){
+            const all = getExtra();
+            const ex = all[phone] || all[phone.replace(/\D/g,'')];
+            if(ex && (ex.dob || ex.job)){
+              // Show a small toast
+              let toast = document.getElementById('optima-extra-toast');
+              if(!toast){ toast=document.createElement('div'); toast.id='optima-extra-toast'; toast.style.cssText='position:fixed;bottom:20px;right:20px;background:#242529;border:1px solid #3D3E40;padding:12px 16px;border-radius:10px;z-index:9999;color:#fff;font-size:13px'; document.body.appendChild(toast); }
+              toast.innerHTML = `<b>Client Extra:</b> DOB: ${ex.dob||'-'} | Job: ${ex.job||'-'}`;
+              setTimeout(()=>{ if(toast) toast.remove(); }, 4000);
+            }
+          }
+        }
+      }, 400);
+    }
+  });
+  // Try inject on load and on DOM changes
+  setInterval(inject, 1500);
+  window.addEventListener('load', ()=> setTimeout(inject, 1000));
+})();
+</script>
 </body>
+
 
 
 
