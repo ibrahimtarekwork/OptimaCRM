@@ -2,30 +2,65 @@
 <html lang="en">
 <head>
 <script>
-// FIREBASE IS SOURCE OF TRUTH - fixes different users on different devices
-// On every load, fetch Firebase optima.json and overwrite localStorage with it, BEFORE app starts
+// OPTIMA DEFINITIVE USERS FIX - Firebase is source of truth, correct Supabase format
 (function(){
   try{
     var FB = 'https://optima-crm-6b76d-default-rtdb.firebaseio.com/optima.json';
-    var DONE_KEY = 'optima_firebase_first_done';
-    // Only do this once per page load, not in a loop
-    // We use sessionStorage to avoid infinite reload
-    if(sessionStorage.getItem(DONE_KEY)) return;
-    fetch(FB, {cache: 'no-store'}).then(function(r){ return r.json(); }).then(function(data){
-      if(!data) return;
-      try{
-        // Overwrite localStorage with Firebase data - Firebase wins
-        if(data.users && Array.isArray(data.users) && data.users.length) localStorage.setItem('optima_users', JSON.stringify(data.users));
-        if(data.leads && Array.isArray(data.leads)) localStorage.setItem('optima_leads', JSON.stringify(data.leads));
-        if(data.deals && Array.isArray(data.deals)) localStorage.setItem('optima_deals', JSON.stringify(data.deals));
-        if(data.market) localStorage.setItem('optima_market', JSON.stringify(data.market));
-        if(data.notifications) localStorage.setItem('optima_notifications', JSON.stringify(data.notifications));
-        if(data.settings) localStorage.setItem('optima_settings', JSON.stringify(data.settings));
-        // Mark done and reload once so app reads the fresh Firebase data
-        sessionStorage.setItem(DONE_KEY, '1');
-        // Only reload if we actually overwrote something - check if users differ
+    if(sessionStorage.getItem('optima_users_fix_done')) return;
+    var DEFAULTS = [
+      {id:'u0', name:'Ibrahim', mobile:'0100 123 4567', email:'', role:'Admin', status:'Active', pin:'1234'},
+      {id:'u1', name:'Sales 1', mobile:'0112 345 6789', email:'', role:'Sales', status:'Active', pin:'1111'},
+      {id:'u2', name:'Sales 2', mobile:'0122 456 7890', email:'', role:'Sales', status:'Active', pin:'2222'},
+      {id:'u3', name:'Operation', mobile:'0101 987 6543', email:'', role:'Operation', status:'Active', pin:'9999'},
+      {id:'u4', name:'Accountant', mobile:'0100 999 8888', email:'', role:'Accountant', status:'Active', pin:'5555'}
+    ];
+    function unwrap(u){ return u && u.data ? u.data : u; }
+    function wrap(u){ return {data: u, id: u.id, updated_at: new Date().toISOString()}; }
+    fetch(FB, {cache:'no-store'}).then(function(r){ return r.json(); }).then(function(data){
+      data = data || {};
+      var raw = data.users || {};
+      var list = [];
+      if(Array.isArray(raw)){ list = raw.map(unwrap).filter(Boolean); }
+      else if(raw && typeof raw === 'object'){ list = Object.values(raw).map(unwrap).filter(Boolean); }
+      // Keep existing users (Operation, Ali, Accountant, etc.) - do NOT delete Ali
+      var byName = {};
+      list.forEach(function(u){ if(u && u.name) byName[String(u.name).toLowerCase()] = u; });
+      var changed = false;
+      // Add missing defaults - Ibrahim, Sales1, Sales2, Operation, Accountant
+      DEFAULTS.forEach(function(d){
+        if(!byName[d.name.toLowerCase()]){
+          list.push(d);
+          changed = true;
+        }
+      });
+      // If list is empty (Firebase deleted), use defaults
+      if(!list.length){ list = DEFAULTS.slice(); changed = true; }
+      // Write back to Firebase in CORRECT wrapped format - exactly like Operation: {data, id, updated_at}
+      // Only write if we added missing users, or if Firebase format was wrong (direct, not wrapped)
+      var needsWrapFix = false;
+      if(Array.isArray(raw)){ needsWrapFix = true; }
+      else if(raw && typeof raw === 'object'){
+        var vals = Object.values(raw);
+        if(vals.length && !vals[0].data) needsWrapFix = true;
+      }
+      // Always store unwrapped in localStorage so app reads pin/name correctly
+      try{ localStorage.setItem('optima_users', JSON.stringify(list)); }catch(e){}
+      if(changed || needsWrapFix){
+        var wrapped = {};
+        list.forEach(function(u, i){ wrapped[String(i)] = wrap(u); });
+        data.users = wrapped;
+        fetch(FB, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)}).then(function(){
+          sessionStorage.setItem('optima_users_fix_done','1');
+          location.reload();
+        }).catch(function(){
+          sessionStorage.setItem('optima_users_fix_done','1');
+          location.reload();
+        });
+      } else {
+        sessionStorage.setItem('optima_users_fix_done','1');
+        // If localStorage was different from Firebase, reload once to show Firebase users
         location.reload();
-      }catch(e){}
+      }
     }).catch(function(){});
   }catch(e){}
 })();
