@@ -1,97 +1,63 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<style id="optima-clear-colors">
-/* OPTIMA - CLEAR COLORS - HIGH CONTRAST */
-#optima-users-manager-overlay{ background:#ffffff !important; color:#111111 !important; }
-#optima-users-manager-overlay h1{ color:#000 !important; font-size:24px !important; font-weight:800 !important; }
-#optima-users-manager-overlay p, #optima-users-manager-overlay span, #optima-users-manager-overlay b, #optima-users-manager-overlay label{ color:#111 !important; }
-#optima-users-manager-overlay input, #optima-users-manager-overlay select{ background:#ffffff !important; color:#111 !important; border:2px solid #111 !important; font-size:16px !important; }
+<style id="optima-clear">
+#optima-users-manager-overlay{ background:#ffffff !important; color:#111 !important; }
+#optima-users-manager-overlay input, #optima-users-manager-overlay select{ background:#fff !important; color:#111 !important; border:2px solid #111 !important; font-size:16px !important; }
 #optima-users-manager-overlay input::placeholder{ color:#666 !important; }
-#optima-users-manager-overlay .optima-card{ background:#ffffff !important; border:2px solid #111 !important; }
-#optima-users-manager-overlay .optima-btn-add{ background:#000 !important; color:#fff !important; font-size:17px !important; font-weight:700 !important; }
-#optima-users-manager-overlay .optima-btn-del{ background:#dc2626 !important; color:#fff !important; font-weight:700 !important; }
-#optima-users-manager-overlay .optima-btn-refresh{ background:#e5e7eb !important; color:#111 !important; font-weight:700 !important; border:2px solid #111 !important; }
-#optima-users-manager-overlay .optima-user-row{ border-bottom:2px solid #e5e7eb !important; }
-#optima-users-manager-overlay .optima-avatar{ background:#000 !important; color:#fff !important; }
 </style>
 <script>
-// OPTIMA - USERS MANAGER CLEAR COLORS + LOGIN FROM CLOUD USERS
+// OPTIMA - USERS MANAGER - ADD + EDIT + DELETE - ALL FROM CLOUD - CLEAR COLORS
 (function(){
   var FB = 'https://optima-crm-6b76d-default-rtdb.firebaseio.com/optima.json';
   function unwrap(raw){ var arr=Array.isArray(raw)?raw:Object.values(raw||{}); return arr.map(function(x){ return (x&&x.data)?x.data:x; }).filter(function(u){ return u&&u.name; }); }
   async function getCloudUsers(){ try{ var r=await fetch(FB,{cache:'no-store'}); var d=await r.json()||{}; return unwrap(d.users); }catch(e){ return []; } }
-  // LOGIN FROM CLOUD: intercept Login button - check Name + PIN against Firebase users, not hardcoded list
-  async function handleLoginClick(e){
+  // LOGIN FROM CLOUD
+  document.addEventListener('click', async function(e){
     try{
-      var btn = e.target.closest ? e.target.closest('button') : null;
-      if(!btn) return;
-      var txt = (btn.textContent||'').trim().toLowerCase();
-      if(txt!=='login' && txt!=='sign in' && txt!=='دخول') return;
-      // Find name input (text) and PIN input (password or PIN placeholder)
-      var inputs = Array.from(document.querySelectorAll('input'));
-      var nameInput = document.getElementById('optima-login-name') || inputs.find(function(i){ return i.placeholder && i.placeholder.toLowerCase().indexOf('name')!==-1; }) || inputs.find(function(i){ return i.type==='text'; });
-      var pinInput = inputs.find(function(i){ return i.type==='password'; }) || inputs.find(function(i){ return i.placeholder && (i.placeholder.toLowerCase().indexOf('pin')!==-1 || i.placeholder.toLowerCase().indexOf('password')!==-1); });
-      if(!nameInput || !pinInput) return;
-      var nameVal = (nameInput.value||'').trim();
-      var pinVal = (pinInput.value||'').trim();
-      if(!nameVal || !pinVal) return; // let app show required
-      var users = await getCloudUsers();
-      var found = users.find(function(u){ return String(u.name||'').toLowerCase()===nameVal.toLowerCase() && String(u.pin)===String(pinVal); });
-      if(!found){
-        e.preventDefault(); e.stopPropagation();
-        alert('Wrong name or PIN. Users in Cloud: ' + users.map(function(u){ return u.name; }).join(', '));
-        return false;
-      }
-      // Found - store in session so app can use it, and also inject users into localStorage for app state
-      try{ sessionStorage.setItem('optima_cloud_login_user', JSON.stringify(found)); }catch(err){}
-      // Let app proceed - it will find user because we injected cloud users into its state via localStorage override below
-      try{ localStorage.setItem('optima_users', JSON.stringify(users)); }catch(err){}
+      var btn = e.target.closest ? e.target.closest('button') : null; if(!btn) return;
+      var txt=(btn.textContent||'').trim().toLowerCase(); if(txt!=='login' && txt!=='sign in') return;
+      var inputs=Array.from(document.querySelectorAll('input'));
+      var nameInput=document.getElementById('optima-login-name') || inputs.find(function(i){ return i.placeholder && i.placeholder.toLowerCase().indexOf('name')!==-1; }) || inputs.find(function(i){ return i.type==='text'; });
+      var pinInput=inputs.find(function(i){ return i.type==='password'; }) || inputs.find(function(i){ return i.placeholder && (i.placeholder.toLowerCase().indexOf('pin')!==-1); });
+      if(!nameInput||!pinInput) return;
+      var nv=(nameInput.value||'').trim(); var pv=(pinInput.value||'').trim(); if(!nv||!pv) return;
+      var users=await getCloudUsers();
+      var found=users.find(function(u){ return String(u.name||'').toLowerCase()===nv.toLowerCase() && String(u.pin)===String(pv); });
+      if(!found){ e.preventDefault(); e.stopPropagation(); alert('Wrong name or PIN. Users in Cloud: '+users.map(function(u){return u.name;}).join(', ')); return false; }
+      try{ sessionStorage.setItem('optima_cloud_login_user', JSON.stringify(found)); localStorage.setItem('optima_users', JSON.stringify(users)); }catch(err){}
     }catch(err){}
+  }, true);
+  function fixLogin(){
+    try{ document.querySelectorAll('select').forEach(function(sel){ var opts=Array.from(sel.options||[]).map(function(o){return o.text;}).join(' '); if(opts.indexOf('Operation')!==-1||opts.indexOf('Ibrahim')!==-1){ var inp=document.createElement('input'); inp.type='text'; inp.id='optima-login-name'; inp.placeholder='Enter your name'; inp.style.cssText='width:100%;padding:12px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111;'; sel.parentNode.replaceChild(inp, sel); } }); }catch(e){}
   }
-  document.addEventListener('click', handleLoginClick, true);
-  // Replace Login dropdown with Name text input if it exists
-  function fixLoginDropdown(){
-    try{
-      var selects = document.querySelectorAll('select');
-      selects.forEach(function(sel){
-        var opts = Array.from(sel.options||[]).map(function(o){ return o.text; }).join(' ');
-        if(opts.indexOf('Operation')!==-1 || opts.indexOf('Ibrahim')!==-1){
-          var input = document.createElement('input');
-          input.type='text'; input.id='optima-login-name'; input.placeholder='Enter your name';
-          input.style.cssText='width:100%;padding:12px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111;';
-          sel.parentNode.replaceChild(input, sel);
-        }
-      });
-    }catch(e){}
-  }
-  var obs = new MutationObserver(fixLoginDropdown);
-  document.addEventListener('DOMContentLoaded', function(){ if(document.body) obs.observe(document.body,{childList:true,subtree:true}); fixLoginDropdown(); });
-  if(document.body) obs.observe(document.body,{childList:true,subtree:true});
+  var obs=new MutationObserver(fixLogin); document.addEventListener('DOMContentLoaded', function(){ if(document.body) obs.observe(document.body,{childList:true,subtree:true}); fixLogin(); }); if(document.body) obs.observe(document.body,{childList:true,subtree:true});
 
-  // USERS MANAGER - CLEAR COLORS
   function openUsersManager(){
     if(document.getElementById('optima-users-manager-overlay')) return;
-    var overlay = document.createElement('div');
-    overlay.id='optima-users-manager-overlay';
-    overlay.style.cssText='position:fixed;inset:0;z-index:99999;background:#ffffff;overflow:auto;font-family:system-ui,Arial;color:#111;';
-    overlay.innerHTML = '<div style="max-width:720px;margin:0 auto;padding:20px">'
-      + '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><h1 style="font-size:24px;margin:8px 0;color:#000;font-weight:800">Optima - Users Manager</h1><button id="optima-close-users" style="padding:10px 14px;border:0;border-radius:8px;background:#000;color:#fff;cursor:pointer;font-weight:700;font-size:15px">Close X</button></div>'
-      + '<p style="color:#111;font-size:14px;margin:0 0 16px;font-weight:600">Cloud only - Firebase - Delete / Add works here</p>'
-      + '<div id="optima-users-status" style="font-size:14px;padding:12px;border-radius:8px;background:#fef9c3;border:2px solid #111;margin-bottom:14px;white-space:pre-wrap;color:#111;font-weight:600">Loading users from Cloud...</div>'
-      + '<div class="optima-card" style="background:#fff;border:2px solid #111;border-radius:12px;padding:16px;margin-bottom:14px"><b style="color:#000;font-size:18px">Add new user</b>'
-      + '<label style="display:block;font-size:14px;margin:10px 0 4px;color:#111;font-weight:700">Name *</label><input id="optima-f-name" placeholder="e.g. Ahmed" style="width:100%;padding:13px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111">'
-      + '<div style="display:flex;gap:10px"><div style="flex:1"><label style="display:block;font-size:14px;margin:10px 0 4px;color:#111;font-weight:700">Role</label><select id="optima-f-role" style="width:100%;padding:13px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111"><option>Sales</option><option>Operation</option><option>Accountant</option><option>Admin</option></select></div>'
-      + '<div style="flex:1"><label style="display:block;font-size:14px;margin:10px 0 4px;color:#111;font-weight:700">PIN *</label><input id="optima-f-pin" placeholder="e.g. 3333" inputmode="numeric" style="width:100%;padding:13px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111"></div></div>'
-      + '<label style="display:block;font-size:14px;margin:10px 0 4px;color:#111;font-weight:700">Mobile</label><input id="optima-f-mobile" placeholder="01..." style="width:100%;padding:13px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111">'
-      + '<label style="display:block;font-size:14px;margin:10px 0 4px;color:#111;font-weight:700">Email</label><input id="optima-f-email" placeholder="...@..." style="width:100%;padding:13px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111">'
-      + '<div style="height:12px"></div><button id="optima-add-user" class="optima-btn-add" style="padding:14px;border:0;border-radius:8px;background:#000;color:#fff;width:100%;cursor:pointer;font-size:17px;font-weight:800">+ Add User to Cloud</button></div>'
-      + '<div class="optima-card" style="background:#fff;border:2px solid #111;border-radius:12px;padding:16px"><b style="color:#000;font-size:18px">Users in Cloud (<span id="optima-count">-</span>)</b><div id="optima-list"></div><button id="optima-refresh-users" class="optima-btn-refresh" style="background:#e5e7eb;width:100%;margin-top:12px;padding:13px;border:2px solid #111;border-radius:8px;cursor:pointer;color:#111;font-weight:800;font-size:15px">Refresh from Cloud</button></div></div>';
-    document.body.appendChild(overlay);
-    document.getElementById('optima-close-users').onclick=function(){ overlay.remove(); };
-    function setStatus(txt, ok){ var s=document.getElementById('optima-users-status'); if(!s) return; s.textContent=txt; s.style.background = ok ? '#dcfce7' : '#fef9c3'; s.style.color='#111'; }
-    async function getAll(){ var r=await fetch(FB,{cache:'no-store'}); var d=await r.json()||{}; return {all:d, users:unwrap(d.users)}; }
-    async function saveAll(all, users){ var w={}; users.forEach(function(u,i){ w[String(i)]={data:u, id:u.id||('u'+i), updated_at:new Date().toISOString()}; }); all.users=w; await fetch(FB,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(all)}); }
+    var o=document.createElement('div'); o.id='optima-users-manager-overlay';
+    o.style.cssText='position:fixed;inset:0;z-index:99999;background:#ffffff;overflow:auto;font-family:system-ui,Arial;color:#111;';
+    o.innerHTML='<div style="max-width:720px;margin:0 auto;padding:20px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><h1 style="font-size:24px;color:#000;font-weight:800;margin:8px 0">Optima - Users Manager</h1><button id="optima-close-users" style="padding:10px 14px;border:0;border-radius:8px;background:#000;color:#fff;cursor:pointer;font-weight:700;font-size:15px">Close X</button></div>'
+      +'<p style="color:#111;font-size:14px;font-weight:600;margin:0 0 14px">Cloud only - Firebase - Add / Edit / Delete works here</p>'
+      +'<div id="optima-users-status" style="font-size:14px;padding:12px;border-radius:8px;background:#fef9c3;border:2px solid #111;margin-bottom:14px;white-space:pre-wrap;color:#111;font-weight:600">Loading...</div>'
+      +'<div style="background:#fff;border:2px solid #111;border-radius:12px;padding:16px;margin-bottom:14px"><b style="color:#000;font-size:18px" id="optima-form-title">Add new user</b>'
+      +'<input type="hidden" id="optima-edit-id" value="">'
+      +'<label style="display:block;font-size:14px;margin:10px 0 4px;color:#111;font-weight:700">Name *</label><input id="optima-f-name" placeholder="e.g. Ahmed" style="width:100%;padding:13px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111">'
+      +'<div style="display:flex;gap:10px"><div style="flex:1"><label style="display:block;font-size:14px;margin:10px 0 4px;color:#111;font-weight:700">Role</label><select id="optima-f-role" style="width:100%;padding:13px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111"><option>Sales</option><option>Operation</option><option>Accountant</option><option>Admin</option></select></div>'
+      +'<div style="flex:1"><label style="display:block;font-size:14px;margin:10px 0 4px;color:#111;font-weight:700">PIN *</label><input id="optima-f-pin" placeholder="e.g. 3333" inputmode="numeric" style="width:100%;padding:13px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111"></div></div>'
+      +'<label style="display:block;font-size:14px;margin:10px 0 4px;color:#111;font-weight:700">Mobile</label><input id="optima-f-mobile" placeholder="01..." style="width:100%;padding:13px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111">'
+      +'<label style="display:block;font-size:14px;margin:10px 0 4px;color:#111;font-weight:700">Email</label><input id="optima-f-email" placeholder="...@..." style="width:100%;padding:13px;border:2px solid #111;border-radius:8px;font-size:16px;background:#fff;color:#111">'
+      +'<div style="height:12px"></div><button id="optima-save-user" style="padding:14px;border:0;border-radius:8px;background:#000;color:#fff;width:100%;cursor:pointer;font-size:17px;font-weight:800">+ Add User to Cloud</button>'
+      +'<button id="optima-cancel-edit" style="display:none;padding:12px;border:2px solid #111;border-radius:8px;background:#fff;color:#111;width:100%;cursor:pointer;font-size:15px;font-weight:700;margin-top:8px">Cancel Edit</button></div>'
+      +'<div style="background:#fff;border:2px solid #111;border-radius:12px;padding:16px"><b style="color:#000;font-size:18px">Users in Cloud (<span id="optima-count">-</span>)</b><div id="optima-list"></div><button id="optima-refresh-users" style="background:#e5e7eb;width:100%;margin-top:12px;padding:13px;border:2px solid #111;border-radius:8px;cursor:pointer;color:#111;font-weight:800;font-size:15px">Refresh from Cloud</button></div></div>';
+    document.body.appendChild(o);
+    document.getElementById('optima-close-users').onclick=function(){ o.remove(); };
+    function setStatus(txt, ok){ var s=document.getElementById('optima-users-status'); if(!s) return; s.textContent=txt; s.style.background=ok?'#dcfce7':'#fef9c3'; s.style.color='#111'; }
+    async function getAll(){ var r=await fetch(FB,{cache:'no-store'}); if(!r.ok) throw new Error('Firebase fetch failed: '+r.status); var d=await r.json()||{}; return {all:d, users:unwrap(d.users)}; }
+    async function saveAll(all, users){ var w={}; users.forEach(function(u,i){ w[String(i)]={data:u, id:u.id||('u'+i), updated_at:new Date().toISOString()}; }); all.users=w; var r=await fetch(FB,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(all)}); if(!r.ok) throw new Error('Firebase save failed: '+r.status); }
+    function resetForm(){ document.getElementById('optima-edit-id').value=''; document.getElementById('optima-form-title').textContent='Add new user'; document.getElementById('optima-save-user').textContent='+ Add User to Cloud'; document.getElementById('optima-cancel-edit').style.display='none'; document.getElementById('optima-f-name').value=''; document.getElementById('optima-f-pin').value=''; document.getElementById('optima-f-mobile').value=''; document.getElementById('optima-f-email').value=''; document.getElementById('optima-f-role').value='Sales'; }
+    document.getElementById('optima-cancel-edit').onclick=resetForm;
     async function load(){
       setStatus('Loading users from Cloud...');
       try{
@@ -100,43 +66,56 @@
         var list=document.getElementById('optima-list'); list.innerHTML='';
         if(!res.users.length){ list.innerHTML='<p style="color:#111;font-weight:600">No users in Cloud. Add the first admin below.</p>'; setStatus('Cloud is empty - add the first admin.', true); return; }
         res.users.forEach(function(u){
-          var div=document.createElement('div'); div.className='optima-user-row'; div.style.cssText='display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:2px solid #e5e7eb';
-          div.innerHTML='<div class="optima-avatar" style="width:44px;height:44px;border-radius:50%;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px">'+(u.name||'?').slice(0,1)+'</div><div style="flex:1"><b style="display:block;color:#000;font-size:16px">'+(u.name||'')+'</b><span style="color:#111;font-size:13px;font-weight:600">'+(u.role||'')+' - PIN: '+(u.pin||'')+' - '+(u.mobile||'')+' '+(u.email||'')+'</span></div>';
-          var del=document.createElement('button'); del.textContent='Delete'; del.className='optima-btn-del'; del.style.cssText='padding:12px 16px;border:0;border-radius:8px;background:#dc2626;color:#fff;cursor:pointer;font-weight:800;font-size:14px';
-          del.onclick=async function(){ if(!confirm('Delete '+u.name+' from Cloud?')) return; setStatus('Deleting '+u.name+'...'); try{ var r2=await getAll(); r2.users=r2.users.filter(function(x){ return String(x.name)!==String(u.name); }); await saveAll(r2.all, r2.users); setStatus('Deleted '+u.name+' from Cloud.', true); load(); }catch(e){ setStatus('Error: '+e.message); } };
-          div.appendChild(del); list.appendChild(div);
+          var div=document.createElement('div'); div.style.cssText='display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:2px solid #e5e7eb';
+          div.innerHTML='<div style="width:44px;height:44px;border-radius:50%;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex-shrink:0">'+(u.name||'?').slice(0,1)+'</div><div style="flex:1"><b style="display:block;color:#000;font-size:16px">'+(u.name||'')+'</b><span style="color:#111;font-size:13px;font-weight:600">'+(u.role||'')+' - PIN: '+(u.pin||'')+' - '+(u.mobile||'')+' '+(u.email||'')+'</span></div>';
+          var edit=document.createElement('button'); edit.textContent='Edit'; edit.style.cssText='padding:12px 14px;border:2px solid #111;border-radius:8px;background:#fff;color:#111;cursor:pointer;font-weight:800;font-size:14px';
+          edit.onclick=function(){
+            document.getElementById('optima-edit-id').value=u.id||u.name;
+            document.getElementById('optima-form-title').textContent='Edit user: '+u.name;
+            document.getElementById('optima-save-user').textContent='Save Changes to Cloud';
+            document.getElementById('optima-cancel-edit').style.display='block';
+            document.getElementById('optima-f-name').value=u.name||''; document.getElementById('optima-f-pin').value=u.pin||''; document.getElementById('optima-f-role').value=u.role||'Sales'; document.getElementById('optima-f-mobile').value=u.mobile||''; document.getElementById('optima-f-email').value=u.email||'';
+            setStatus('Editing '+u.name+' - change and press Save Changes.', true);
+            window.scrollTo(0,0);
+          };
+          var del=document.createElement('button'); del.textContent='Delete'; del.style.cssText='padding:12px 14px;border:0;border-radius:8px;background:#dc2626;color:#fff;cursor:pointer;font-weight:800;font-size:14px';
+          del.onclick=async function(){ if(!confirm('Delete '+u.name+' from Cloud?')) return; setStatus('Deleting '+u.name+'...'); try{ var r2=await getAll(); r2.users=r2.users.filter(function(x){ return String(x.name)!==String(u.name) && String(x.id)!==String(u.id); }); await saveAll(r2.all, r2.users); setStatus('Deleted '+u.name+' from Cloud.', true); resetForm(); load(); }catch(e){ setStatus('Error deleting: '+e.message); } };
+          div.appendChild(edit); div.appendChild(del); list.appendChild(div);
         });
-        setStatus('Loaded '+res.users.length+' users from Cloud. Delete / Add here writes to Firebase directly.', true);
+        setStatus('Loaded '+res.users.length+' users from Cloud. Tap Edit to change, Delete to remove.', true);
       }catch(e){ setStatus('Error loading: '+e.message); }
     }
     document.getElementById('optima-refresh-users').onclick=load;
-    document.getElementById('optima-add-user').onclick=async function(){
+    document.getElementById('optima-save-user').onclick=async function(){
+      var editId=document.getElementById('optima-edit-id').value;
       var name=document.getElementById('optima-f-name').value.trim();
       var pin=document.getElementById('optima-f-pin').value.trim();
       var role=document.getElementById('optima-f-role').value;
       var mobile=document.getElementById('optima-f-mobile').value.trim();
       var email=document.getElementById('optima-f-email').value.trim();
       if(!name||!pin){ setStatus('Write Name and PIN first.'); return; }
-      setStatus('Adding '+name+' to Cloud...');
+      setStatus((editId?'Saving changes for ':'Adding ')+name+' to Cloud...');
       try{
         var res=await getAll();
-        if(res.users.some(function(u){ return String(u.name).toLowerCase()===name.toLowerCase(); })){ setStatus('A user named '+name+' already exists.'); return; }
-        res.users.push({id:'u'+Date.now(), name:name, role:role, pin:pin, mobile:mobile, email:email, status:'Active'});
-        await saveAll(res.all, res.users);
-        document.getElementById('optima-f-name').value=''; document.getElementById('optima-f-pin').value=''; document.getElementById('optima-f-mobile').value=''; document.getElementById('optima-f-email').value='';
-        setStatus('Added '+name+' to Cloud!', true); load();
-      }catch(e){ setStatus('Error adding: '+e.message); }
+        if(editId){
+          var idx=res.users.findIndex(function(u){ return String(u.id)===String(editId) || String(u.name)===String(editId); });
+          if(idx===-1){ setStatus('User not found - it may have been deleted. Reloading...'); load(); return; }
+          res.users[idx]={id:res.users[idx].id||editId, name:name, role:role, pin:pin, mobile:mobile, email:email, status:res.users[idx].status||'Active'};
+          await saveAll(res.all, res.users);
+          setStatus('Saved changes for '+name+' to Cloud!', true);
+        } else {
+          if(res.users.some(function(u){ return String(u.name).toLowerCase()===name.toLowerCase(); })){ setStatus('A user named '+name+' already exists. Use Edit to change it, or another name.'); return; }
+          res.users.push({id:'u'+Date.now(), name:name, role:role, pin:pin, mobile:mobile, email:email, status:'Active'});
+          await saveAll(res.all, res.users);
+          setStatus('Added '+name+' to Cloud!', true);
+        }
+        resetForm(); load();
+      }catch(e){ setStatus('Error saving: '+e.message+' - Check internet / Firebase rules.'); }
     };
     load();
   }
   document.addEventListener('click', function(e){
-    var el=e.target;
-    while(el && el!==document.body){
-      var txt=(el.textContent||'').trim();
-      if(txt==='Users' || txt==='User Management' || txt==='Manage Users'){ e.preventDefault(); e.stopPropagation(); openUsersManager(); return; }
-      if(el.tagName==='A' && el.getAttribute && el.getAttribute('href') && el.getAttribute('href').toLowerCase().indexOf('user')!==-1){ e.preventDefault(); e.stopPropagation(); openUsersManager(); return; }
-      el=el.parentElement;
-    }
+    var el=e.target; while(el && el!==document.body){ var txt=(el.textContent||'').trim(); if(txt==='Users'||txt==='User Management'){ e.preventDefault(); e.stopPropagation(); openUsersManager(); return; } if(el.tagName==='A'&&el.getAttribute&&el.getAttribute('href')&&el.getAttribute('href').toLowerCase().indexOf('user')!==-1){ e.preventDefault(); e.stopPropagation(); openUsersManager(); return; } el=el.parentElement; }
   }, true);
   window.openUsersManager=openUsersManager;
 })();
