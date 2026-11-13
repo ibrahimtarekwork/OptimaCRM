@@ -2463,6 +2463,45 @@ create table if not exists deals (id text primary key, data jsonb not null, upda
   });
 }catch(e){}})();
 </script>
+
+<style>
+/* OPTIMA LOGO RESTORE - isolated, cannot break app */
+.optima-logo-fix{display:flex;align-items:center;gap:10px}
+.optima-logo-fix img{width:32px;height:32px;border-radius:8px;object-fit:cover}
+</style>
+<script>
+/* Restore Optima logo + name if missing - isolated */
+(function(){try{
+  function addLogo(){
+    var sidebar = document.querySelector("aside") || document.querySelector("nav") || document.body;
+    if(!sidebar) return;
+    if(document.querySelector(".optima-logo-fix")) return;
+    // Find OPTIMA text element
+    var all = document.querySelectorAll("*");
+    for(var i=0;i<all.length;i++){
+      var el = all[i];
+      if(el.children.length===0 && (el.textContent||"").trim()==="OPTIMA"){
+        var wrap = document.createElement("div");
+        wrap.className = "optima-logo-fix";
+        var img = document.createElement("img");
+        img.src = "https://optima-crm.vercel.app/logo.png";
+        img.alt = "Optima";
+        img.onerror = function(){ this.style.display="none"; var s=document.createElement("span"); s.textContent="O"; s.style.cssText="width:32px;height:32px;background:#C0392B;color:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px"; wrap.prepend(s); };
+        var txt = document.createElement("span");
+        txt.textContent = "OPTIMA";
+        txt.style.cssText = "font-weight:900;letter-spacing:2px";
+        wrap.appendChild(img);
+        wrap.appendChild(txt);
+        el.parentNode.replaceChild(wrap, el);
+        break;
+      }
+    }
+  }
+  window.addEventListener("load", function(){ setTimeout(addLogo, 800); setTimeout(addLogo, 2000); });
+  // Also set document title and favicon
+  try{ document.title = "Optima CRM"; }catch(e){}
+})(); 
+</script>
 </body>
 
 
