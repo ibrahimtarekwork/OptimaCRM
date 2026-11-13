@@ -2,30 +2,120 @@
 <html lang="en">
 <head>
 <script>
-// OPTIMA - CLOUD ONLY - NO RELOAD - NO LOCALSTORAGE STALE DATA
+// OPTIMA - REBUILT USERS PAGE - CLOUD ONLY - NO CONSTANTS - NO DROPDOWN
 (function(){
   try{
-    // Clear stale localStorage ONCE per load - no reload, no loop
-    try{
-      ['optima_users','optima_leads','optima_deals','optima_market','optima_notifications'].forEach(function(k){
-        try{ localStorage.removeItem(k); }catch(e){}
-      });
-    }catch(e){}
-    // Make getItem return null for Optima data keys, so app never reads stale local - it will use Firebase Bridge
+    var FB = 'https://optima-crm-6b76d-default-rtdb.firebaseio.com/optima.json';
+    // 1. Disable stale localStorage for users - Cloud only
     var origGet = Storage.prototype.getItem;
+    var origSet = Storage.prototype.setItem;
     Storage.prototype.getItem = function(k){
-      if(k && String(k).indexOf('optima_')===0 && k!=='optima_session_user_obj' && k!=='optima_cloud_loaded'){
-        return null;
-      }
+      if(k && String(k)==='optima_users') return null;
       return origGet.apply(this, arguments);
     };
-    // Make setItem NOT save Optima data to localStorage - only Cloud via Firebase Bridge
-    var origSet = Storage.prototype.setItem;
     Storage.prototype.setItem = function(k, v){
-      if(k && String(k).indexOf('optima_')===0 && k!=='optima_session_user_obj'){
-        return; // do not save - Cloud only
-      }
+      if(k && String(k)==='optima_users') return;
       return origSet.apply(this, arguments);
+    };
+    // 2. Helper: fetch users from Cloud, unwrap data, handle Object or Array
+    window.__optimaCloudUsers = async function(){
+      try{
+        var r = await fetch(FB, {cache:'no-store'});
+        var d = await r.json() || {};
+        var raw = d.users || [];
+        var arr = Array.isArray(raw) ? raw : Object.values(raw);
+        var users = arr.map(function(x){ return (x && x.data) ? x.data : x; }).filter(function(u){ return u && u.name; });
+        // If NO users in Cloud, create ONE seed admin - the FIRST admin to start from
+        // This is the ONLY hardcoded user, and only as seed when Cloud is empty
+        if(!users.length){
+          var seed = {id:'u0', name:'Ibrahim', mobile:'', email:'', role:'Admin', status:'Active', pin:'1234'};
+          var wrapped = { '0': {data: seed, id: seed.id, updated_at: new Date().toISOString()} };
+          d.users = wrapped;
+          await fetch(FB, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(d)});
+          return [seed];
+        }
+        return users;
+      }catch(e){ return []; }
+    };
+    // 3. Helper: save users to Cloud in correct wrapped format {data, id, updated_at}
+    window.__optimaSaveUsers = async function(users){
+      try{
+        var r = await fetch(FB, {cache:'no-store'});
+        var d = await r.json() || {};
+        var wrapped = {};
+        users.forEach(function(u, i){ wrapped[String(i)] = {data: u, id: u.id || ('u'+i), updated_at: new Date().toISOString()}; });
+        d.users = wrapped;
+        await fetch(FB, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(d)});
+        return true;
+      }catch(e){ return false; }
+    };
+    // 4. Replace Login dropdown with Name + PIN inputs - observe DOM
+    function replaceLogin(){
+      try{
+        var selects = document.querySelectorAll('select');
+        selects.forEach(function(sel){
+          var opts = Array.from(sel.options||[]).map(function(o){ return o.text; }).join(' ');
+          if(opts.indexOf('Operation')!==-1 || opts.indexOf('Ibrahim')!==-1 || sel.closest('div') && sel.closest('div').textContent.indexOf('Select User')!==-1){
+            // Replace select with text input for name
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.placeholder = 'Enter your name';
+            input.className = sel.className;
+            input.id = 'optima-login-name';
+            input.style.cssText = sel.style.cssText + ';width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;';
+            // Copy value handling: when login is clicked, we will read this input
+            sel.parentNode.replaceChild(input, sel);
+            // Store reference for login check
+            window.__optimaLoginNameInput = input;
+          }
+        });
+        // Also intercept Login button to check Name + PIN against Cloud, not dropdown
+        var btns = Array.from(document.querySelectorAll('button'));
+        btns.forEach(function(b){
+          if(b.textContent.trim().toLowerCase()==='login' && !b.dataset.optimaCloudLogin){
+            b.dataset.optimaCloudLogin = '1';
+            b.addEventListener('click', async function(e){
+              try{
+                var nameInput = document.getElementById('optima-login-name');
+                var pinInput = document.querySelector('input[type="password"]') || document.querySelector('input[placeholder*="PIN"]') || document.querySelector('input[placeholder*="Password"]');
+                if(nameInput && pinInput){
+                  var nameVal = nameInput.value.trim();
+                  var pinVal = pinInput.value.trim();
+                  if(!nameVal || !pinVal) return; // let app handle empty
+                  var users = await window.__optimaCloudUsers();
+                  var found = users.find(function(u){ return String(u.name||'').toLowerCase()===nameVal.toLowerCase() && String(u.pin)===String(pinVal); });
+                  if(!found){
+                    // Show error - prevent app's old dropdown logic from logging in with wrong user
+                    // We let the app try, but if it fails it will show Wrong PIN - that's fine
+                    // To force correct check, we store found user in session
+                    sessionStorage.setItem('optima_cloud_login_attempt', JSON.stringify({name:nameVal, pin:pinVal, found: false}));
+                  } else {
+                    sessionStorage.setItem('optima_cloud_login_attempt', JSON.stringify({name:nameVal, pin:pinVal, found: true, user: found}));
+                    // Also put found user into localStorage temporarily so app's login logic (which reads from users state) can find it
+                    // The app's users state is from k1 defaults + localStorage - we inject found user there
+                    try{ localStorage.setItem('optima_users', JSON.stringify(users)); }catch(e){}
+                    // Restore original setItem for this one write, then re-block
+                    // Actually our override blocks optima_users set - so we need to use origSet directly
+                    try{ origSet.call(localStorage, 'optima_users', JSON.stringify(users)); }catch(e){}
+                  }
+                }
+              }catch(e){}
+            });
+          }
+        });
+      }catch(e){}
+    }
+    // Observe DOM for login and Users page
+    var obs = new MutationObserver(function(){ replaceLogin(); });
+    document.addEventListener('DOMContentLoaded', function(){ obs.observe(document.body, {childList:true, subtree:true}); replaceLogin(); });
+    // Start observing immediately if body exists
+    if(document.body) obs.observe(document.body, {childList:true, subtree:true});
+    // 5. Users page - when user clicks Users, fetch fresh from Cloud and inject into app state via localStorage + reload
+    // We add a global that the Users page can use: window.__optimaRefreshUsersFromCloud
+    window.__optimaRefreshUsersFromCloud = async function(){
+      var users = await window.__optimaCloudUsers();
+      try{ origSet.call(localStorage, 'optima_users', JSON.stringify(users)); }catch(e){}
+      return users;
     };
   }catch(e){}
 })();
