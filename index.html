@@ -2,66 +2,67 @@
 <html lang="en">
 <head>
 <script>
-// OPTIMA DEFINITIVE USERS FIX - Firebase is source of truth, correct Supabase format
+// OPTIMA - NO LOCALSTORAGE - CLOUD ONLY - Firebase is the ONLY source
 (function(){
   try{
     var FB = 'https://optima-crm-6b76d-default-rtdb.firebaseio.com/optima.json';
-    if(sessionStorage.getItem('optima_users_fix_done')) return;
-    var DEFAULTS = [
-      {id:'u0', name:'Ibrahim', mobile:'0100 123 4567', email:'', role:'Admin', status:'Active', pin:'1234'},
-      {id:'u1', name:'Sales 1', mobile:'0112 345 6789', email:'', role:'Sales', status:'Active', pin:'1111'},
-      {id:'u2', name:'Sales 2', mobile:'0122 456 7890', email:'', role:'Sales', status:'Active', pin:'2222'},
-      {id:'u3', name:'Operation', mobile:'0101 987 6543', email:'', role:'Operation', status:'Active', pin:'9999'},
-      {id:'u4', name:'Accountant', mobile:'0100 999 8888', email:'', role:'Accountant', status:'Active', pin:'5555'}
-    ];
-    function unwrap(u){ return u && u.data ? u.data : u; }
-    function wrap(u){ return {data: u, id: u.id, updated_at: new Date().toISOString()}; }
+    // 1. Disable localStorage for Optima keys - app will never read stale local data
+    var origGet = Storage.prototype.getItem;
+    var origSet = Storage.prototype.setItem;
+    var OPTIMA_KEYS = ['optima_users','optima_leads','optima_deals','optima_market','optima_notifications','optima_settings','optima_session_user_obj'];
+    // Do NOT block session_user_obj - login session needs it for refresh stay, but users/leads/deals are cloud-only
+    // Actually user said cancel localStorage COMPLETELY - so we block optima_users/leads/deals/market, but keep session for login
+    // To keep login working, we allow session_user_obj, but clear it on logout only
+    Storage.prototype.getItem = function(k){
+      if(k && String(k).indexOf('optima_')===0 && k!=='optima_session_user_obj'){
+        // Return null so app falls back to Firebase fetch, not stale local
+        return null;
+      }
+      return origGet.apply(this, arguments);
+    };
+    // 2. On every load, fetch Firebase FIRST and put it in localStorage TEMPORARILY so app can read it, then clear after app loads
+    // We use a synchronous trick: fetch Firebase, store in a global, and let the app's Si() read from global via overridden getItem
+    var cloudCache = null;
+    var cloudReady = false;
+    // Override getItem to return cloud data if available
+    var origGet2 = Storage.prototype.getItem;
+    Storage.prototype.getItem = function(k){
+      if(k && String(k).indexOf('optima_')===0 && k!=='optima_session_user_obj'){
+        if(cloudCache && cloudCache[k]){
+          return JSON.stringify(cloudCache[k]);
+        }
+        return null;
+      }
+      return origGet.apply(this, arguments);
+    };
+    // Fetch Firebase now - block app? We fetch async, app will read null first (k1 defaults), then we reload once with cloudCache
     fetch(FB, {cache:'no-store'}).then(function(r){ return r.json(); }).then(function(data){
       data = data || {};
-      var raw = data.users || {};
-      var list = [];
-      if(Array.isArray(raw)){ list = raw.map(unwrap).filter(Boolean); }
-      else if(raw && typeof raw === 'object'){ list = Object.values(raw).map(unwrap).filter(Boolean); }
-      // Keep existing users (Operation, Ali, Accountant, etc.) - do NOT delete Ali
-      var byName = {};
-      list.forEach(function(u){ if(u && u.name) byName[String(u.name).toLowerCase()] = u; });
-      var changed = false;
-      // Add missing defaults - Ibrahim, Sales1, Sales2, Operation, Accountant
-      DEFAULTS.forEach(function(d){
-        if(!byName[d.name.toLowerCase()]){
-          list.push(d);
-          changed = true;
-        }
-      });
-      // If list is empty (Firebase deleted), use defaults
-      if(!list.length){ list = DEFAULTS.slice(); changed = true; }
-      // Write back to Firebase in CORRECT wrapped format - exactly like Operation: {data, id, updated_at}
-      // Only write if we added missing users, or if Firebase format was wrong (direct, not wrapped)
-      var needsWrapFix = false;
-      if(Array.isArray(raw)){ needsWrapFix = true; }
-      else if(raw && typeof raw === 'object'){
-        var vals = Object.values(raw);
-        if(vals.length && !vals[0].data) needsWrapFix = true;
+      cloudCache = {};
+      // Unwrap users: Firebase stores as {0:{data, id, updated_at}, 1:..} OR array - handle both
+      function unwrapList(raw){
+        if(!raw) return [];
+        var arr = Array.isArray(raw) ? raw : Object.values(raw);
+        return arr.map(function(x){ return (x && x.data) ? x.data : x; }).filter(Boolean);
       }
-      // Always store unwrapped in localStorage so app reads pin/name correctly
-      try{ localStorage.setItem('optima_users', JSON.stringify(list)); }catch(e){}
-      if(changed || needsWrapFix){
-        var wrapped = {};
-        list.forEach(function(u, i){ wrapped[String(i)] = wrap(u); });
-        data.users = wrapped;
-        fetch(FB, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)}).then(function(){
-          sessionStorage.setItem('optima_users_fix_done','1');
-          location.reload();
-        }).catch(function(){
-          sessionStorage.setItem('optima_users_fix_done','1');
-          location.reload();
-        });
-      } else {
-        sessionStorage.setItem('optima_users_fix_done','1');
-        // If localStorage was different from Firebase, reload once to show Firebase users
+      if(data.users) cloudCache['optima_users'] = unwrapList(data.users);
+      if(data.leads) cloudCache['optima_leads'] = unwrapList(data.leads);
+      if(data.deals) cloudCache['optima_deals'] = unwrapList(data.deals);
+      if(data.market) cloudCache['optima_market'] = data.market;
+      if(data.notifications) cloudCache['optima_notifications'] = unwrapList(data.notifications);
+      if(data.settings) cloudCache['optima_settings'] = data.settings;
+      // If cloud has users, reload once so app reads cloudCache instead of defaults
+      if(!sessionStorage.getItem('optima_cloud_loaded')){
+        sessionStorage.setItem('optima_cloud_loaded','1');
         location.reload();
       }
     }).catch(function(){});
+    // 3. Clear optima localStorage on unload - never keep local copy
+    window.addEventListener('beforeunload', function(){
+      try{
+        OPTIMA_KEYS.forEach(function(k){ if(k!=='optima_session_user_obj') origSet.call(localStorage, k, ''); localStorage.removeItem(k); });
+      }catch(e){}
+    });
   }catch(e){}
 })();
 </script>
@@ -109,6 +110,7 @@
           let rows = data[key] || data['market'] || [];
           if(tbl==='market_updates' && !data['market_updates'] && data['market']) rows = data['market'];
           if(tbl==='market' && !data['market'] && data['market_updates']) rows = data['market_updates'];
+          if(rows && !Array.isArray(rows) && typeof rows === 'object') rows = Object.values(rows);
           // Supabase returns [{id, data, updated_at}] - convert Firebase stored rows
           // Our Firebase stores rows as plain objects already in same shape if previously saved via this bridge
           // If rows are plain lead objects, wrap them
@@ -121,7 +123,9 @@
         if(method==='POST'){
           const body = opts.body ? JSON.parse(opts.body) : null;
           const data = await fbGet();
-          let arr = Array.isArray(data[key]) ? [...data[key]] : [];
+          let rawArr = data[key];
+          if(rawArr && !Array.isArray(rawArr) && typeof rawArr === 'object') rawArr = Object.values(rawArr);
+          let arr = Array.isArray(rawArr) ? [...rawArr] : [];
           const items = Array.isArray(body) ? body : [body];
           for(const it of items){
             const id = it.id;
@@ -139,7 +143,9 @@
           const m2 = s.match(/id=eq\.([^&]+)/);
           const delId = m2 ? decodeURIComponent(m2[1]) : null;
           const data = await fbGet();
-          let arr = Array.isArray(data[key]) ? [...data[key]] : [];
+          let rawDel = data[key];
+          if(rawDel && !Array.isArray(rawDel) && typeof rawDel === 'object') rawDel = Object.values(rawDel);
+          let arr = Array.isArray(rawDel) ? [...rawDel] : [];
           arr = arr.filter(x=> x.id!==delId && !(x.data && x.data.id===delId));
           data[key]=arr;
           await fbPut(data);
