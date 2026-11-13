@@ -2,122 +2,87 @@
 <html lang="en">
 <head>
 <script>
-// OPTIMA - REBUILT USERS PAGE - CLOUD ONLY - NO CONSTANTS - NO DROPDOWN
+// OPTIMA - USERS BUTTON OPENS MANAGER - OLD USERS PAGE DISABLED
 (function(){
-  try{
+  // Manager HTML is embedded as a full-screen overlay - talks directly to Firebase
+  function openUsersManager(){
+    if(document.getElementById('optima-users-manager-overlay')) return;
+    var overlay = document.createElement('div');
+    overlay.id = 'optima-users-manager-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#f6f7f9;overflow:auto;font-family:system-ui,Arial;';
+    overlay.innerHTML = '<div style="max-width:720px;margin:0 auto;padding:16px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center"><h1 style="font-size:22px;margin:8px 0 4px">Optima - Users Manager</h1><button id="optima-close-users" style="padding:8px 12px;border:0;border-radius:8px;background:#111;color:#fff;cursor:pointer">Close X</button></div>'
+      + '<p style="color:#666;font-size:13px;margin:0 0 16px">Cloud only - Firebase - Delete / Add works here</p>'
+      + '<div id="optima-users-status" style="font-size:13px;padding:10px;border-radius:8px;background:#fffbe6;border:1px solid #fde68a;margin-bottom:12px;white-space:pre-wrap">Loading users from Cloud...</div>'
+      + '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:12px"><b>Add new user</b>'
+      + '<label style="display:block;font-size:13px;margin:8px 0 4px">Name *</label><input id="optima-f-name" placeholder="e.g. Ahmed" style="width:100%;padding:11px;border:1px solid #ddd;border-radius:8px;font-size:15px">'
+      + '<div style="display:flex;gap:8px"><div style="flex:1"><label style="display:block;font-size:13px;margin:8px 0 4px">Role</label><select id="optima-f-role" style="width:100%;padding:11px;border:1px solid #ddd;border-radius:8px"><option>Sales</option><option>Operation</option><option>Accountant</option><option>Admin</option></select></div>'
+      + '<div style="flex:1"><label style="display:block;font-size:13px;margin:8px 0 4px">PIN *</label><input id="optima-f-pin" placeholder="e.g. 3333" inputmode="numeric" style="width:100%;padding:11px;border:1px solid #ddd;border-radius:8px"></div></div>'
+      + '<label style="display:block;font-size:13px;margin:8px 0 4px">Mobile</label><input id="optima-f-mobile" placeholder="01..." style="width:100%;padding:11px;border:1px solid #ddd;border-radius:8px">'
+      + '<label style="display:block;font-size:13px;margin:8px 0 4px">Email</label><input id="optima-f-email" placeholder="...@..." style="width:100%;padding:11px;border:1px solid #ddd;border-radius:8px">'
+      + '<div style="height:10px"></div><button id="optima-add-user" style="padding:11px 14px;border:0;border-radius:8px;background:#111;color:#fff;width:100%;cursor:pointer">+ Add User to Cloud</button></div>'
+      + '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px"><b>Users in Cloud (<span id="optima-count">-</span>)</b><div id="optima-list"></div><button id="optima-refresh-users" style="background:#eee;width:100%;margin-top:10px;padding:11px;border:0;border-radius:8px;cursor:pointer">Refresh from Cloud</button></div></div>';
+    document.body.appendChild(overlay);
+    document.getElementById('optima-close-users').onclick = function(){ overlay.remove(); };
     var FB = 'https://optima-crm-6b76d-default-rtdb.firebaseio.com/optima.json';
-    // 1. Disable stale localStorage for users - Cloud only
-    var origGet = Storage.prototype.getItem;
-    var origSet = Storage.prototype.setItem;
-    Storage.prototype.getItem = function(k){
-      if(k && String(k)==='optima_users') return null;
-      return origGet.apply(this, arguments);
-    };
-    Storage.prototype.setItem = function(k, v){
-      if(k && String(k)==='optima_users') return;
-      return origSet.apply(this, arguments);
-    };
-    // 2. Helper: fetch users from Cloud, unwrap data, handle Object or Array
-    window.__optimaCloudUsers = async function(){
+    function setStatus(txt, ok){ var s=document.getElementById('optima-users-status'); if(!s) return; s.textContent=txt; s.style.background = ok ? '#ecfdf5' : '#fffbe6'; }
+    function unwrap(raw){ var arr=Array.isArray(raw)?raw:Object.values(raw||{}); return arr.map(function(x){ return (x&&x.data)?x.data:x; }).filter(function(u){ return u&&u.name; }); }
+    async function getAll(){ var r=await fetch(FB,{cache:'no-store'}); var d=await r.json()||{}; return {all:d, users:unwrap(d.users)}; }
+    async function saveAll(all, users){ var w={}; users.forEach(function(u,i){ w[String(i)]={data:u, id:u.id||('u'+i), updated_at:new Date().toISOString()}; }); all.users=w; await fetch(FB,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(all)}); }
+    async function load(){
+      setStatus('Loading users from Cloud...');
       try{
-        var r = await fetch(FB, {cache:'no-store'});
-        var d = await r.json() || {};
-        var raw = d.users || [];
-        var arr = Array.isArray(raw) ? raw : Object.values(raw);
-        var users = arr.map(function(x){ return (x && x.data) ? x.data : x; }).filter(function(u){ return u && u.name; });
-        // If NO users in Cloud, create ONE seed admin - the FIRST admin to start from
-        // This is the ONLY hardcoded user, and only as seed when Cloud is empty
-        if(!users.length){
-          var seed = {id:'u0', name:'Ibrahim', mobile:'', email:'', role:'Admin', status:'Active', pin:'1234'};
-          var wrapped = { '0': {data: seed, id: seed.id, updated_at: new Date().toISOString()} };
-          d.users = wrapped;
-          await fetch(FB, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(d)});
-          return [seed];
-        }
-        return users;
-      }catch(e){ return []; }
-    };
-    // 3. Helper: save users to Cloud in correct wrapped format {data, id, updated_at}
-    window.__optimaSaveUsers = async function(users){
-      try{
-        var r = await fetch(FB, {cache:'no-store'});
-        var d = await r.json() || {};
-        var wrapped = {};
-        users.forEach(function(u, i){ wrapped[String(i)] = {data: u, id: u.id || ('u'+i), updated_at: new Date().toISOString()}; });
-        d.users = wrapped;
-        await fetch(FB, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(d)});
-        return true;
-      }catch(e){ return false; }
-    };
-    // 4. Replace Login dropdown with Name + PIN inputs - observe DOM
-    function replaceLogin(){
-      try{
-        var selects = document.querySelectorAll('select');
-        selects.forEach(function(sel){
-          var opts = Array.from(sel.options||[]).map(function(o){ return o.text; }).join(' ');
-          if(opts.indexOf('Operation')!==-1 || opts.indexOf('Ibrahim')!==-1 || sel.closest('div') && sel.closest('div').textContent.indexOf('Select User')!==-1){
-            // Replace select with text input for name
-            var input = document.createElement('input');
-            input.type = 'text';
-            input.placeholder = 'Enter your name';
-            input.className = sel.className;
-            input.id = 'optima-login-name';
-            input.style.cssText = sel.style.cssText + ';width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;';
-            // Copy value handling: when login is clicked, we will read this input
-            sel.parentNode.replaceChild(input, sel);
-            // Store reference for login check
-            window.__optimaLoginNameInput = input;
-          }
+        var res=await getAll();
+        document.getElementById('optima-count').textContent=res.users.length;
+        var list=document.getElementById('optima-list'); list.innerHTML='';
+        if(!res.users.length){ list.innerHTML='<p style="color:#666">No users in Cloud. Add the first admin below.</p>'; setStatus('Cloud is empty - add the first admin.', true); return; }
+        res.users.forEach(function(u){
+          var div=document.createElement('div'); div.style.cssText='display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #eee';
+          div.innerHTML='<div style="width:40px;height:40px;border-radius:50%;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700">'+(u.name||'?').slice(0,1)+'</div><div style="flex:1"><b style="display:block">'+(u.name||'')+'</b><span style="color:#666;font-size:12px">'+(u.role||'')+' - PIN: '+(u.pin||'')+' - '+(u.mobile||'')+' '+(u.email||'')+'</span></div>';
+          var del=document.createElement('button'); del.textContent='Delete'; del.style.cssText='padding:11px 14px;border:0;border-radius:8px;background:#fee2e2;color:#b91c1c;cursor:pointer';
+          del.onclick=async function(){ if(!confirm('Delete '+u.name+' from Cloud?')) return; setStatus('Deleting '+u.name+'...'); try{ var r2=await getAll(); r2.users=r2.users.filter(function(x){ return String(x.name)!==String(u.name); }); await saveAll(r2.all, r2.users); setStatus('Deleted '+u.name+' from Cloud.', true); load(); }catch(e){ setStatus('Error: '+e.message); } };
+          div.appendChild(del); list.appendChild(div);
         });
-        // Also intercept Login button to check Name + PIN against Cloud, not dropdown
-        var btns = Array.from(document.querySelectorAll('button'));
-        btns.forEach(function(b){
-          if(b.textContent.trim().toLowerCase()==='login' && !b.dataset.optimaCloudLogin){
-            b.dataset.optimaCloudLogin = '1';
-            b.addEventListener('click', async function(e){
-              try{
-                var nameInput = document.getElementById('optima-login-name');
-                var pinInput = document.querySelector('input[type="password"]') || document.querySelector('input[placeholder*="PIN"]') || document.querySelector('input[placeholder*="Password"]');
-                if(nameInput && pinInput){
-                  var nameVal = nameInput.value.trim();
-                  var pinVal = pinInput.value.trim();
-                  if(!nameVal || !pinVal) return; // let app handle empty
-                  var users = await window.__optimaCloudUsers();
-                  var found = users.find(function(u){ return String(u.name||'').toLowerCase()===nameVal.toLowerCase() && String(u.pin)===String(pinVal); });
-                  if(!found){
-                    // Show error - prevent app's old dropdown logic from logging in with wrong user
-                    // We let the app try, but if it fails it will show Wrong PIN - that's fine
-                    // To force correct check, we store found user in session
-                    sessionStorage.setItem('optima_cloud_login_attempt', JSON.stringify({name:nameVal, pin:pinVal, found: false}));
-                  } else {
-                    sessionStorage.setItem('optima_cloud_login_attempt', JSON.stringify({name:nameVal, pin:pinVal, found: true, user: found}));
-                    // Also put found user into localStorage temporarily so app's login logic (which reads from users state) can find it
-                    // The app's users state is from k1 defaults + localStorage - we inject found user there
-                    try{ localStorage.setItem('optima_users', JSON.stringify(users)); }catch(e){}
-                    // Restore original setItem for this one write, then re-block
-                    // Actually our override blocks optima_users set - so we need to use origSet directly
-                    try{ origSet.call(localStorage, 'optima_users', JSON.stringify(users)); }catch(e){}
-                  }
-                }
-              }catch(e){}
-            });
-          }
-        });
-      }catch(e){}
+        setStatus('Loaded '+res.users.length+' users from Cloud. Delete / Add here writes to Firebase directly.', true);
+      }catch(e){ setStatus('Error loading: '+e.message); }
     }
-    // Observe DOM for login and Users page
-    var obs = new MutationObserver(function(){ replaceLogin(); });
-    document.addEventListener('DOMContentLoaded', function(){ obs.observe(document.body, {childList:true, subtree:true}); replaceLogin(); });
-    // Start observing immediately if body exists
-    if(document.body) obs.observe(document.body, {childList:true, subtree:true});
-    // 5. Users page - when user clicks Users, fetch fresh from Cloud and inject into app state via localStorage + reload
-    // We add a global that the Users page can use: window.__optimaRefreshUsersFromCloud
-    window.__optimaRefreshUsersFromCloud = async function(){
-      var users = await window.__optimaCloudUsers();
-      try{ origSet.call(localStorage, 'optima_users', JSON.stringify(users)); }catch(e){}
-      return users;
+    document.getElementById('optima-refresh-users').onclick = load;
+    document.getElementById('optima-add-user').onclick = async function(){
+      var name=document.getElementById('optima-f-name').value.trim();
+      var pin=document.getElementById('optima-f-pin').value.trim();
+      var role=document.getElementById('optima-f-role').value;
+      var mobile=document.getElementById('optima-f-mobile').value.trim();
+      var email=document.getElementById('optima-f-email').value.trim();
+      if(!name||!pin){ setStatus('Write Name and PIN first.'); return; }
+      setStatus('Adding '+name+' to Cloud...');
+      try{
+        var res=await getAll();
+        if(res.users.some(function(u){ return String(u.name).toLowerCase()===name.toLowerCase(); })){ setStatus('A user named '+name+' already exists.'); return; }
+        res.users.push({id:'u'+Date.now(), name:name, role:role, pin:pin, mobile:mobile, email:email, status:'Active'});
+        await saveAll(res.all, res.users);
+        document.getElementById('optima-f-name').value=''; document.getElementById('optima-f-pin').value=''; document.getElementById('optima-f-mobile').value=''; document.getElementById('optima-f-email').value='';
+        setStatus('Added '+name+' to Cloud!', true); load();
+      }catch(e){ setStatus('Error adding: '+e.message); }
     };
-  }catch(e){}
+    load();
+  }
+  // Intercept any click on Users nav - open Manager instead of old page
+  document.addEventListener('click', function(e){
+    var el = e.target;
+    while(el && el!==document.body){
+      var txt = (el.textContent||'').trim();
+      if(txt==='Users' || txt==='User Management' || txt==='Manage Users'){
+        e.preventDefault(); e.stopPropagation(); openUsersManager(); return;
+      }
+      // Also check if element is a nav link with href containing users
+      if(el.tagName==='A' && el.getAttribute && el.getAttribute('href') && el.getAttribute('href').toLowerCase().indexOf('user')!==-1){
+        e.preventDefault(); e.stopPropagation(); openUsersManager(); return;
+      }
+      el = el.parentElement;
+    }
+  }, true);
+  // Also expose globally
+  window.openUsersManager = openUsersManager;
 })();
 </script>
 <script>
@@ -162,9 +127,9 @@
         if(method==='GET'){
           const data = await fbGet();
           let rows = data[key] || data['market'] || [];
+          if(rows && !Array.isArray(rows) && typeof rows === 'object') rows = Object.values(rows);
           if(tbl==='market_updates' && !data['market_updates'] && data['market']) rows = data['market'];
           if(tbl==='market' && !data['market'] && data['market_updates']) rows = data['market_updates'];
-          if(rows && !Array.isArray(rows) && typeof rows === 'object') rows = Object.values(rows);
           // Supabase returns [{id, data, updated_at}] - convert Firebase stored rows
           // Our Firebase stores rows as plain objects already in same shape if previously saved via this bridge
           // If rows are plain lead objects, wrap them
@@ -177,9 +142,7 @@
         if(method==='POST'){
           const body = opts.body ? JSON.parse(opts.body) : null;
           const data = await fbGet();
-          let rawArr = data[key];
-          if(rawArr && !Array.isArray(rawArr) && typeof rawArr === 'object') rawArr = Object.values(rawArr);
-          let arr = Array.isArray(rawArr) ? [...rawArr] : [];
+          let arr = Array.isArray(data[key]) ? [...data[key]] : [];
           const items = Array.isArray(body) ? body : [body];
           for(const it of items){
             const id = it.id;
@@ -197,9 +160,7 @@
           const m2 = s.match(/id=eq\.([^&]+)/);
           const delId = m2 ? decodeURIComponent(m2[1]) : null;
           const data = await fbGet();
-          let rawDel = data[key];
-          if(rawDel && !Array.isArray(rawDel) && typeof rawDel === 'object') rawDel = Object.values(rawDel);
-          let arr = Array.isArray(rawDel) ? [...rawDel] : [];
+          let arr = Array.isArray(data[key]) ? [...data[key]] : [];
           arr = arr.filter(x=> x.id!==delId && !(x.data && x.data.id===delId));
           data[key]=arr;
           await fbPut(data);
