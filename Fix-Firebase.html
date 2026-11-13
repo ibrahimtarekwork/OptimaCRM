@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Optima - Fix Users in Firebase</title>
+<style>
+body{font-family:system-ui;background:#121621;color:#fff;padding:20px;max-width:800px;margin:0 auto}
+input,select{width:100%;padding:10px;margin:6px 0;background:#1A1E29;border:1px solid #3D3E40;color:#fff;border-radius:8px;box-sizing:border-box}
+button{padding:10px 16px;border:0;border-radius:8px;font-weight:800;cursor:pointer}
+.gold{background:#C9A86A;color:#121621}.ghost{background:#2A2E3B;color:#fff}.red{background:#C0392B;color:#fff}
+.card{background:#242529;border:1px solid #3D3E40;border-radius:12px;padding:14px;margin:10px 0}
+.small{color:#A9ADB8;font-size:12px}.ok{color:#22C55E}.err{color:#FF5252}.row{display:flex;gap:8px;flex-wrap:wrap}
+</style></head>
+<body>
+<h1>Optima - Fix Users in Firebase <span style="color:#C9A86A">RTDB</span></h1>
+<p class="small">الصفحة دي بتكلم Firebase مباشرة: <br><code>https://optima-crm-6b76d-default-rtdb.firebaseio.com/users</code></p>
+<div class="card">
+<h3>Users في Firebase دلوقتي</h3>
+<button class="gold" onclick="load()">Load Users from Firebase</button>
+<button class="ghost" onclick="resetFresh()">Reset to Fresh 5 - Accountant = عبدالحميد طه</button>
+<p id="status" class="small"></p>
+</div>
+<div id="list"></div>
+<script>
+const DB="https://optima-crm-6b76d-default-rtdb.firebaseio.com/users.json";
+function permsFor(role){
+ let pages={dashboard:true,leads:true,deals:true,clients:true,properties:true,market:true,reports:true,accounts:(role==='Admin'||role==='Accountant'),users:(role==='Admin'),settings:(role==='Admin')};
+ return {pages,canAddLeads:true,canDeleteLeads:(role==='Admin'),canMarkDoneDeal:true,canExport:(role!=='Sales'),canViewAllLeads:(role!=='Sales')};
+}
+const FRESH=[
+{id:"u0",name:"Ibrahim",mobile:"0100 123 4567",email:"",role:"Admin",status:"Active",pin:"1234"},
+{id:"u1",name:"Sales 1",mobile:"0112 345 6789",email:"",role:"Sales",status:"Active",pin:"1111"},
+{id:"u2",name:"Sales 2",mobile:"0122 456 7890",email:"",role:"Sales",status:"Active",pin:"2222"},
+{id:"u3",name:"Operation",mobile:"0101 987 6543",email:"",role:"Operation",status:"Active",pin:"9999"},
+{id:"u4",name:"عبدالحميد طه",mobile:"0100 999 8888",email:"",role:"Accountant",status:"Active",pin:"5555"},
+];
+async function load(){
+ document.getElementById('status').textContent='Loading from Firebase...';
+ try{
+  let r=await fetch(DB); let j=await r.json();
+  let users=[];
+  if(Array.isArray(j)) users=j;
+  else if(j && typeof j==='object'){
+    Object.keys(j).sort((a,b)=>Number(a)-Number(b)).forEach(k=>{
+      let v=j[k];
+      if(typeof v==='string') users.push({id:'u'+k, name:v, mobile:'', email:'', role: k==='0'?'Admin':(v==='Operation'?'Operation':(v==='Accountant'?'Accountant':'Sales')), status:'Active', pin: k==='0'?'1234':(k==='1'?'9999':'1111'), _isNameOnly:true});
+      else if(v && v.data) users.push({...v.data, id: v.id||('u'+k)});
+      else if(v && v.name) users.push({...v, id: v.id||('u'+k)});
+    });
+  }
+  document.getElementById('status').innerHTML='<span class=ok>Found '+users.length+' entries in Firebase</span>';
+  render(users);
+ }catch(e){document.getElementById('status').innerHTML='<span class=err>'+e.message+'</span>';}
+}
+function render(users){
+ let el=document.getElementById('list');el.innerHTML='';
+ window._users=users;
+ users.forEach((u,i)=>{
+  let d=document.createElement('div');d.className='card';
+  let warn=u._isNameOnly?'<span class=err> ⚠️ اسم بس - بايظ</span>':'<span class=ok>✅ كامل</span>';
+  d.innerHTML=`<b>${u.name}</b> - ${u.role||'?'} - PIN ${u.pin||'?'} - ${warn}<br><span class=small>${u.id}</span><br>
+  <input id="name_${i}" value="${(u.name||'').replace(/"/g,'')}">
+  <input id="pin_${i}" value="${u.pin||''}" placeholder="PIN">
+  <select id="role_${i}"><option ${u.role==='Admin'?'selected':''}>Admin</option><option ${u.role==='Sales'?'selected':''}>Sales</option><option ${u.role==='Operation'?'selected':''}>Operation</option><option ${u.role==='Accountant'?'selected':''}>Accountant</option></select>
+  <div class=row><button class=gold onclick="saveOne(${i})">Save to Firebase</button><button class=red onclick="delOne(${i})">Delete</button></div><p id="msg_${i}" class=small></p>`;
+  el.appendChild(d);
+ });
+}
+async function saveOne(i){
+ let u=window._users[i];
+ let name=document.getElementById('name_'+i).value.trim();
+ let pin=document.getElementById('pin_'+i).value.trim();
+ let role=document.getElementById('role_'+i).value;
+ if(!name){document.getElementById('msg_'+i).innerHTML='<span class=err>الاسم فاضي</span>';return;}
+ let updated={id:u.id, name, mobile:u.mobile||'', email:u.email||'', role, status:'Active', pin:pin||u.pin||'1111', perms:permsFor(role)};
+ document.getElementById('msg_'+i).textContent='Saving to Firebase...';
+ try{
+  let all=window._users.map((x,idx)=> idx===i? updated : (x._isNameOnly? {id:x.id, name:x.name, mobile:'', email:'', role:x.role, status:'Active', pin:x.pin, perms:permsFor(x.role)} : {...x, perms: x.perms||permsFor(x.role)}));
+  all=all.map(x=>{let y={...x};delete y._isNameOnly;return y;});
+  let r=await fetch(DB,{method:'PUT',body:JSON.stringify(all)});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  document.getElementById('msg_'+i).innerHTML='<span class=ok>Saved to Firebase! ✅ افتح الموقع ودوس Sync Now</span>';
+  try{localStorage.setItem('optima_users',JSON.stringify(all));}catch{}
+ }catch(e){document.getElementById('msg_'+i).innerHTML='<span class=err>'+e.message+'</span>';}
+}
+async function delOne(i){
+ if(!confirm('Delete this user from Firebase?'))return;
+ let all=window._users.filter((_,idx)=>idx!==i).map(x=>{let y={...x};delete y._isNameOnly;if(!y.perms) y.perms=permsFor(y.role);return y;});
+ await fetch(DB,{method:'PUT',body:JSON.stringify(all)});
+ try{localStorage.setItem('optima_users',JSON.stringify(all));}catch{}
+ alert('Deleted from Firebase! افتح الموقع ودوس Sync Now');
+ load();
+}
+async function resetFresh(){
+ if(!confirm('Reset Firebase users to fresh 5? Accountant will be عبدالحميد طه.'))return;
+ let all=FRESH.map(u=>({...u, perms:permsFor(u.role)}));
+ await fetch(DB,{method:'PUT',body:JSON.stringify(all)});
+ try{localStorage.setItem('optima_users',JSON.stringify(all));}catch{}
+ alert('Done! Firebase now has fresh 5 users - Accountant = عبدالحميد طه. افتح الموقع ودوس Sync Now');
+ load();
+}
+load();
+</script></body></html>
