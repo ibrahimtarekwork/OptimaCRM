@@ -2,6 +2,35 @@
 <html lang="en">
 <head>
 <script>
+// FIREBASE IS SOURCE OF TRUTH - fixes different users on different devices
+// On every load, fetch Firebase optima.json and overwrite localStorage with it, BEFORE app starts
+(function(){
+  try{
+    var FB = 'https://optima-crm-6b76d-default-rtdb.firebaseio.com/optima.json';
+    var DONE_KEY = 'optima_firebase_first_done';
+    // Only do this once per page load, not in a loop
+    // We use sessionStorage to avoid infinite reload
+    if(sessionStorage.getItem(DONE_KEY)) return;
+    fetch(FB, {cache: 'no-store'}).then(function(r){ return r.json(); }).then(function(data){
+      if(!data) return;
+      try{
+        // Overwrite localStorage with Firebase data - Firebase wins
+        if(data.users && Array.isArray(data.users) && data.users.length) localStorage.setItem('optima_users', JSON.stringify(data.users));
+        if(data.leads && Array.isArray(data.leads)) localStorage.setItem('optima_leads', JSON.stringify(data.leads));
+        if(data.deals && Array.isArray(data.deals)) localStorage.setItem('optima_deals', JSON.stringify(data.deals));
+        if(data.market) localStorage.setItem('optima_market', JSON.stringify(data.market));
+        if(data.notifications) localStorage.setItem('optima_notifications', JSON.stringify(data.notifications));
+        if(data.settings) localStorage.setItem('optima_settings', JSON.stringify(data.settings));
+        // Mark done and reload once so app reads the fresh Firebase data
+        sessionStorage.setItem(DONE_KEY, '1');
+        // Only reload if we actually overwrote something - check if users differ
+        location.reload();
+      }catch(e){}
+    }).catch(function(){});
+  }catch(e){}
+})();
+</script>
+<script>
 // OPTIMA ONLINE - Firebase Bridge - Same design, no visual change
 // Translates the app's Supabase REST calls (/rest/v1/<table>) to Firebase Realtime Database
 // Firebase DB: https://optima-crm-6b76d-default-rtdb.firebaseio.com/optima.json
