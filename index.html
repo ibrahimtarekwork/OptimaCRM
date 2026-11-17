@@ -2176,7 +2176,32 @@ input,select,textarea{
 </style>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root"><div id="optima-loading" style="background:#ffffff;color:#000000;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,Arial,sans-serif;padding:24px;text-align:center"><div style="font-size:32px;font-weight:900;letter-spacing:2px">OPTIMA</div><div style="margin-top:10px;font-size:16px;font-weight:700">Loading... please wait</div><div style="margin-top:8px;font-size:13px;color:#555">If this stays more than 5 seconds, use the Reload button below.</div><button onclick="location.reload()" style="margin-top:16px;background:#000;color:#fff;border:0;padding:12px 22px;border-radius:10px;font-weight:800;cursor:pointer">Reload</button></div></div>
+  <script>
+  // OPTIMA watchdog - if React fails to render, never leave a black empty page
+  (function(){
+    function showFallback(msg){
+      if(document.getElementById('optima-fallback')) return;
+      var d=document.createElement('div'); d.id='optima-fallback';
+      d.style.cssText='position:fixed;inset:0;z-index:999999;background:#ffffff;color:#000000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;font-family:system-ui,Arial,sans-serif';
+      d.innerHTML='<div style="font-size:30px;font-weight:900;letter-spacing:2px">OPTIMA</div>'
+        +'<div style="margin-top:12px;font-weight:700">The page did not load correctly</div>'
+        +'<div style="margin-top:6px;font-size:13px;color:#555">'+msg+'</div>'
+        +'<button onclick="location.reload()" style="margin-top:16px;background:#000;color:#fff;border:0;padding:12px 22px;border-radius:10px;font-weight:800;cursor:pointer">Reload page</button>'
+        +'<button onclick="try{localStorage.removeItem(\'optima_session_user_obj\');localStorage.removeItem(\'optima_session_user\');}catch(e){} location.reload()" style="margin-top:10px;background:#fff;color:#000;border:2px solid #000;padding:12px 22px;border-radius:10px;font-weight:800;cursor:pointer">Clear saved login &amp; Reload</button>';
+      document.body.appendChild(d);
+    }
+    window.addEventListener('error', function(e){ if(e && e.message) showFallback('Error: '+e.message); }, true);
+    setTimeout(function(){
+      var root=document.getElementById('root');
+      var txt=(root?root.innerText||'':'').trim();
+      // If React rendered the login/dashboard, innerText will be long. If still only "Loading" or empty -> show fallback
+      if(!root || txt==='' || txt==='Loading... please waitIf this stays more than 5 seconds, use the Reload button below.Reload'){
+        showFallback('Still loading after 5 seconds. Your saved login may be for a deleted user.');
+      }
+    }, 6000);
+  })();
+  </script>
   
   <script type="module">var Od=Object.create;var{getPrototypeOf:Pd,defineProperty:Uf,getOwnPropertyNames:ad}=Object;var $d=Object.prototype.hasOwnProperty;var qe=(n,e,r)=>{r=n!=null?Od(Pd(n)):{};let t=e||!n||!n.__esModule?Uf(r,"default",{value:n,enumerable:!0}):r;for(let o of ad(n))if(!$d.call(t,o))Uf(t,o,{get:()=>n[o],enumerable:!0});return t};var To=(n,e)=>()=>(e||n((e={exports:{}}).exports,e),e.exports);var Wd=(n,e)=>{for(var r in e)Uf(n,r,{get:e[r],enumerable:!0,configurable:!0,set:(t)=>e[r]=()=>t})};var Qd=(n,e)=>()=>(n&&(e=n(n=0)),e);var Fr=To((Sd)=>{var Xu=Symbol.for("react.element"),Hd=Symbol.for("react.portal"),Bd=Symbol.for("react.fragment"),Td=Symbol.for("react.strict_mode"),Xd=Symbol.for("react.profiler"),Rd=Symbol.for("react.provider"),Vd=Symbol.for("react.context"),Zd=Symbol.for("react.forward_ref"),Yd=Symbol.for("react.suspense"),Kd=Symbol.for("react.memo"),Jd=Symbol.for("react.lazy"),Qp=Symbol.iterator;function Id(n){if(n===null||typeof n!=="object")return null;return n=Qp&&n[Qp]||n["@@iterator"],typeof n==="function"?n:null}var Tp={isMounted:function(){return!1},enqueueForceUpdate:function(){},enqueueReplaceState:function(){},enqueueSetState:function(){}},Xp=Object.assign,Rp={};function $t(n,e,r){this.props=n,this.context=e,this.refs=Rp,this.updater=r||Tp}$t.prototype.isReactComponent={};$t.prototype.setState=function(n,e){if(typeof n!=="object"&&typeof n!=="function"&&n!=null)throw Error("setState(...): takes an object of state variables to update or a function which returns an object of state variables.");this.updater.enqueueSetState(this,n,e,"setState")};$t.prototype.forceUpdate=function(n){this.updater.enqueueForceUpdate(this,n,"forceUpdate")};function Vp(){}Vp.prototype=$t.prototype;function Sf(n,e,r){this.props=n,this.context=e,this.refs=Rp,this.updater=r||Tp}var Af=Sf.prototype=new Vp;Af.constructor=Sf;Xp(Af,$t.prototype);Af.isPureReactComponent=!0;var Hp=Array.isArray,Zp=Object.prototype.hasOwnProperty,Ff={current:null},Yp={key:!0,ref:!0,__self:!0,__source:!0};function Kp(n,e,r){var t,o={},f=null,i=null;if(e!=null)for(t in e.ref!==void 0&&(i=e.ref),e.key!==void 0&&(f=""+e.key),e)Zp.call(e,t)&&!Yp.hasOwnProperty(t)&&(o[t]=e[t]);var v=arguments.length-2;if(v===1)o.children=r;else if(1<v){for(var y=Array(v),E=0;E<v;E++)y[E]=arguments[E+2];o.children=y}if(n&&n.defaultProps)for(t in v=n.defaultProps,v)o[t]===void 0&&(o[t]=v[t]);return{$$typeof:Xu,type:n,key:f,ref:i,props:o,_owner:Ff.current}}function Gd(n,e){return{$$typeof:Xu,type:n.type,key:e,ref:n.ref,props:n.props,_owner:n._owner}}function Mf(n){return typeof n==="object"&&n!==null&&n.$$typeof===Xu}function Dd(n){var e={"=":"=0",":":"=2"};return"$"+n.replace(/[=:]/g,function(r){return e[r]})}var Bp=/\/+/g;function qf(n,e){return typeof n==="object"&&n!==null&&n.key!=null?Dd(""+n.key):e.toString(36)}function Ro(n,e,r,t,o){var f=typeof n;if(f==="undefined"||f==="boolean")n=null;var i=!1;if(n===null)i=!0;else switch(f){case"string":case"number":i=!0;break;case"object":switch(n.$$typeof){case Xu:case Hd:i=!0}}if(i)return i=n,o=o(i),n=t===""?"."+qf(i,0):t,Hp(o)?(r="",n!=null&&(r=n.replace(Bp,"$&/")+"/"),Ro(o,e,r,"",function(E){return E})):o!=null&&(Mf(o)&&(o=Gd(o,r+(!o.key||i&&i.key===o.key?"":(""+o.key).replace(Bp,"$&/")+"/")+n)),e.push(o)),1;if(i=0,t=t===""?".":t+":",Hp(n))for(var v=0;v<n.length;v++){f=n[v];var y=t+qf(f,v);i+=Ro(f,e,r,y,o)}else if(y=Id(n),typeof y==="function")for(n=y.call(n),v=0;!(f=n.next()).done;)f=f.value,y=t+qf(f,v++),i+=Ro(f,e,r,y,o);else if(f==="object")throw e=String(n),Error("Objects are not valid as a React child (found: "+(e==="[object Object]"?"object with keys {"+Object.keys(n).join(", ")+"}":e)+"). If you meant to render a collection of children, use an array instead.");return i}function Xo(n,e,r){if(n==null)return n;var t=[],o=0;return Ro(n,t,"","",function(f){return e.call(r,f,o++)}),t}function Ud(n){if(n._status===-1){var e=n._result;e=e(),e.then(function(r){if(n._status===0||n._status===-1)n._status=1,n._result=r},function(r){if(n._status===0||n._status===-1)n._status=2,n._result=r}),n._status===-1&&(n._status=0,n._result=e)}if(n._status===1)return n._result.default;throw n._result}var In={current:null},Vo={transition:null},qd={ReactCurrentDispatcher:In,ReactCurrentBatchConfig:Vo,ReactCurrentOwner:Ff};function Jp(){throw Error("act(...) is not supported in production builds of React.")}Sd.Children={map:Xo,forEach:function(n,e,r){Xo(n,function(){e.apply(this,arguments)},r)},count:function(n){var e=0;return Xo(n,function(){e++}),e},toArray:function(n){return Xo(n,function(e){return e})||[]},only:function(n){if(!Mf(n))throw Error("React.Children.only expected to receive a single React element child.");return n}};Sd.Component=$t;Sd.Fragment=Bd;Sd.Profiler=Xd;Sd.PureComponent=Sf;Sd.StrictMode=Td;Sd.Suspense=Yd;Sd.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED=qd;Sd.act=Jp;Sd.cloneElement=function(n,e,r){if(n===null||n===void 0)throw Error("React.cloneElement(...): The argument must be a React element, but you passed "+n+".");var t=Xp({},n.props),o=n.key,f=n.ref,i=n._owner;if(e!=null){if(e.ref!==void 0&&(f=e.ref,i=Ff.current),e.key!==void 0&&(o=""+e.key),n.type&&n.type.defaultProps)var v=n.type.defaultProps;for(y in e)Zp.call(e,y)&&!Yp.hasOwnProperty(y)&&(t[y]=e[y]===void 0&&v!==void 0?v[y]:e[y])}var y=arguments.length-2;if(y===1)t.children=r;else if(1<y){v=Array(y);for(var E=0;E<y;E++)v[E]=arguments[E+2];t.children=v}return{$$typeof:Xu,type:n.type,key:o,ref:f,props:t,_owner:i}};Sd.createContext=function(n){return n={$$typeof:Vd,_currentValue:n,_currentValue2:n,_threadCount:0,Provider:null,Consumer:null,_defaultValue:null,_globalName:null},n.Provider={$$typeof:Rd,_context:n},n.Consumer=n};Sd.createElement=Kp;Sd.createFactory=function(n){var e=Kp.bind(null,n);return e.type=n,e};Sd.createRef=function(){return{current:null}};Sd.forwardRef=function(n){return{$$typeof:Zd,render:n}};Sd.isValidElement=Mf;Sd.lazy=function(n){return{$$typeof:Jd,_payload:{_status:-1,_result:n},_init:Ud}};Sd.memo=function(n,e){return{$$typeof:Kd,type:n,compare:e===void 0?null:e}};Sd.startTransition=function(n){var e=Vo.transition;Vo.transition={};try{n()}finally{Vo.transition=e}};Sd.unstable_act=Jp;Sd.useCallback=function(n,e){return In.current.useCallback(n,e)};Sd.useContext=function(n){return In.current.useContext(n)};Sd.useDebugValue=function(){};Sd.useDeferredValue=function(n){return In.current.useDeferredValue(n)};Sd.useEffect=function(n,e){return In.current.useEffect(n,e)};Sd.useId=function(){return In.current.useId()};Sd.useImperativeHandle=function(n,e,r){return In.current.useImperativeHandle(n,e,r)};Sd.useInsertionEffect=function(n,e){return In.current.useInsertionEffect(n,e)};Sd.useLayoutEffect=function(n,e){return In.current.useLayoutEffect(n,e)};Sd.useMemo=function(n,e){return In.current.useMemo(n,e)};Sd.useReducer=function(n,e,r){return In.current.useReducer(n,e,r)};Sd.useRef=function(n){return In.current.useRef(n)};Sd.useState=function(n){return In.current.useState(n)};Sd.useSyncExternalStore=function(n,e,r){return In.current.useSyncExternalStore(n,e,r)};Sd.useTransition=function(){return In.current.useTransition()};Sd.version="18.3.1"});var Ap=To((Q3)=>{function Lf(n,e){var r=n.length;n.push(e);n:for(;0<r;){var t=r-1>>>1,o=n[t];if(0<Zo(o,e))n[t]=e,n[r]=o,r=t;else break n}}function he(n){return n.length===0?null:n[0]}function Io(n){if(n.length===0)return null;var e=n[0],r=n.pop();if(r!==e){n[0]=r;n:for(var t=0,o=n.length,f=o>>>1;t<f;){var i=2*(t+1)-1,v=n[i],y=i+1,E=n[y];if(0>Zo(v,r))y<o&&0>Zo(E,v)?(n[t]=E,n[y]=r,t=y):(n[t]=v,n[i]=r,t=i);else if(y<o&&0>Zo(E,r))n[t]=E,n[y]=r,t=y;else break n}}return e}function Zo(n,e){var r=n.sortIndex-e.sortIndex;return r!==0?r:n.id-e.id}if(typeof performance==="object"&&typeof performance.now==="function")bf=performance,Q3.unstable_now=function(){return bf.now()};else Yo=Date,xf=Yo.now(),Q3.unstable_now=function(){return Yo.now()-xf};var bf,Yo,xf,Te=[],cr=[],W3=1,ie=null,Tn=3,Go=!1,Mr=!1,Vu=!1,Gp=typeof setTimeout==="function"?setTimeout:null,Dp=typeof clearTimeout==="function"?clearTimeout:null,Ip=typeof setImmediate<"u"?setImmediate:null;typeof navigator<"u"&&navigator.scheduling!==void 0&&navigator.scheduling.isInputPending!==void 0&&navigator.scheduling.isInputPending.bind(navigator.scheduling);function sf(n){for(var e=he(cr);e!==null;){if(e.callback===null)Io(cr);else if(e.startTime<=n)Io(cr),e.sortIndex=e.expirationTime,Lf(Te,e);else break;e=he(cr)}}function nc(n){if(Vu=!1,sf(n),!Mr)if(he(Te)!==null)Mr=!0,rc(ec);else{var e=he(cr);e!==null&&tc(nc,e.startTime-n)}}function ec(n,e){Mr=!1,Vu&&(Vu=!1,Dp(Zu),Zu=-1),Go=!0;var r=Tn;try{sf(e);for(ie=he(Te);ie!==null&&(!(ie.expirationTime>e)||n&&!Sp());){var t=ie.callback;if(typeof t==="function"){ie.callback=null,Tn=ie.priorityLevel;var o=t(ie.expirationTime<=e);e=Q3.unstable_now(),typeof o==="function"?ie.callback=o:ie===he(Te)&&Io(Te),sf(e)}else Io(Te);ie=he(Te)}if(ie!==null)var f=!0;else{var i=he(cr);i!==null&&tc(nc,i.startTime-e),f=!1}return f}finally{ie=null,Tn=r,Go=!1}}var Do=!1,Ko=null,Zu=-1,Up=5,qp=-1;function Sp(){return Q3.unstable_now()-qp<Up?!1:!0}function gf(){if(Ko!==null){var n=Q3.unstable_now();qp=n;var e=!0;try{e=Ko(!0,n)}finally{e?Ru():(Do=!1,Ko=null)}}else Do=!1}var Ru;if(typeof Ip==="function")Ru=function(){Ip(gf)};else if(typeof MessageChannel<"u")Jo=new MessageChannel,jf=Jo.port2,Jo.port1.onmessage=gf,Ru=function(){jf.postMessage(null)};else Ru=function(){Gp(gf,0)};var Jo,jf;function rc(n){Ko=n,Do||(Do=!0,Ru())}function tc(n,e){Zu=Gp(function(){n(Q3.unstable_now())},e)}Q3.unstable_IdlePriority=5;Q3.unstable_ImmediatePriority=1;Q3.unstable_LowPriority=4;Q3.unstable_NormalPriority=3;Q3.unstable_Profiling=null;Q3.unstable_UserBlockingPriority=2;Q3.unstable_cancelCallback=function(n){n.callback=null};Q3.unstable_continueExecution=function(){Mr||Go||(Mr=!0,rc(ec))};Q3.unstable_forceFrameRate=function(n){0>n||125<n?console.error("forceFrameRate takes a positive int between 0 and 125, forcing frame rates higher than 125 fps is not supported"):Up=0<n?Math.floor(1000/n):5};Q3.unstable_getCurrentPriorityLevel=function(){return Tn};Q3.unstable_getFirstCallbackNode=function(){return he(Te)};Q3.unstable_next=function(n){switch(Tn){case 1:case 2:case 3:var e=3;break;default:e=Tn}var r=Tn;Tn=e;try{return n()}finally{Tn=r}};Q3.unstable_pauseExecution=function(){};Q3.unstable_requestPaint=function(){};Q3.unstable_runWithPriority=function(n,e){switch(n){case 1:case 2:case 3:case 4:case 5:break;default:n=3}var r=Tn;Tn=n;try{return e()}finally{Tn=r}};Q3.unstable_scheduleCallback=function(n,e,r){var t=Q3.unstable_now();switch(typeof r==="object"&&r!==null?(r=r.delay,r=typeof r==="number"&&0<r?t+r:t):r=t,n){case 1:var o=-1;break;case 2:o=250;break;case 5:o=1073741823;break;case 4:o=1e4;break;default:o=5000}return o=r+o,n={id:W3++,callback:e,priorityLevel:n,startTime:r,expirationTime:o,sortIndex:-1},r>t?(n.sortIndex=r,Lf(cr,n),he(Te)===null&&n===he(cr)&&(Vu?(Dp(Zu),Zu=-1):Vu=!0,tc(nc,r-t))):(n.sortIndex=o,Lf(Te,n),Mr||Go||(Mr=!0,rc(ec))),n};Q3.unstable_shouldYield=Sp;Q3.unstable_wrapCallback=function(n){var e=Tn;return function(){var r=Tn;Tn=e;try{return n.apply(this,arguments)}finally{Tn=r}}}});var c1={};Wd(c1,{version:()=>i2,unstable_renderSubtreeIntoContainer:()=>u2,unstable_batchedUpdates:()=>t2,unmountComponentAtNode:()=>r2,render:()=>e2,hydrateRoot:()=>n2,hydrate:()=>jh,flushSync:()=>sh,findDOMNode:()=>xh,createRoot:()=>bh,createPortal:()=>Lh,__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED:()=>gh});function $(n){for(var e="https://reactjs.org/docs/error-decoder.html?invariant="+n,r=1;r<arguments.length;r++)e+="&args[]="+encodeURIComponent(arguments[r]);return"Minified React error #"+n+"; visit "+e+" for the full message or use the non-minified dev environment for full errors and additional helpful warnings."}function lt(n,e){gt(n,e),gt(n+"Capture",e)}function gt(n,e){oi[n]=e;for(n=0;n<e.length;n++)xv.add(e[n])}function g3(n){if(ac.call(Mp,n))return!0;if(ac.call(Fp,n))return!1;if(M3.test(n))return Mp[n]=!0;return Fp[n]=!0,!1}function L3(n,e,r,t){if(r!==null&&r.type===0)return!1;switch(typeof e){case"function":case"symbol":return!0;case"boolean":if(t)return!1;if(r!==null)return!r.acceptsBooleans;return n=n.toLowerCase().slice(0,5),n!=="data-"&&n!=="aria-";default:return!1}}function b3(n,e,r,t){if(e===null||typeof e>"u"||L3(n,e,r,t))return!0;if(t)return!1;if(r!==null)switch(r.type){case 3:return!e;case 4:return e===!1;case 5:return isNaN(e);case 6:return isNaN(e)||1>e}return!1}function Un(n,e,r,t,o,f,i){this.acceptsBooleans=e===2||e===3||e===4,this.attributeName=t,this.attributeNamespace=o,this.mustUseProperty=r,this.propertyName=n,this.type=e,this.sanitizeURL=f,this.removeEmptyString=i}function C0(n){return n[1].toUpperCase()}function w0(n,e,r,t){var o=Qn.hasOwnProperty(e)?Qn[e]:null;if(o!==null?o.type!==0:t||!(2<e.length)||e[0]!=="o"&&e[0]!=="O"||e[1]!=="n"&&e[1]!=="N")b3(e,r,o,t)&&(r=null),t||o===null?g3(e)&&(r===null?n.removeAttribute(e):n.setAttribute(e,""+r)):o.mustUseProperty?n[o.propertyName]=r===null?o.type===3?!1:"":r:(e=o.attributeName,t=o.attributeNamespace,r===null?n.removeAttribute(e):(o=o.type,r=o===3||o===4&&r===!0?"":""+r,t?n.setAttributeNS(t,e,r):n.setAttribute(e,r)))}function Yu(n){if(n===null||typeof n!=="object")return null;return n=gp&&n[gp]||n["@@iterator"],typeof n==="function"?n:null}function qu(n){if(uc===void 0)try{throw Error()}catch(r){var e=r.stack.trim().match(/\n( *(at )?)/);uc=e&&e[1]||""}return`
 `+uc+n}function oc(n,e){if(!n||ic)return"";ic=!0;var r=Error.prepareStackTrace;Error.prepareStackTrace=void 0;try{if(e)if(e=function(){throw Error()},Object.defineProperty(e.prototype,"props",{set:function(){throw Error()}}),typeof Reflect==="object"&&Reflect.construct){try{Reflect.construct(e,[])}catch(E){var t=E}Reflect.construct(n,[],e)}else{try{e.call()}catch(E){t=E}n.call(e.prototype)}else{try{throw Error()}catch(E){t=E}n()}}catch(E){if(E&&t&&typeof E.stack==="string"){for(var o=E.stack.split(`
@@ -2270,72 +2295,10 @@ create table if not exists deals (id text primary key, data jsonb not null, upda
 </script>
 
 <script>
-// OPTIMA - Keep login after refresh - Auto-login from saved session - No design change
-(function(){
-  const PINS = {'Ibrahim':'1234','Operation':'9999','Sales 1':'1111','Sales 2':'2222'};
-  // Save session when user logs in
-  document.addEventListener('click', (e)=>{
-    const txt = (e.target.textContent||'').trim().toLowerCase();
-    if(txt==='login' || txt.includes('login')){
-      setTimeout(()=>{
-        try{
-          const sels = Array.from(document.querySelectorAll('select'));
-          const userSel = sels.find(s=> Array.from(s.options).some(o=>o.text.includes('Ibrahim')));
-          if(userSel){
-            localStorage.setItem('optima_session_user', userSel.value);
-            localStorage.setItem('optima_session_at', String(Date.now()));
-          }
-          const pinInput = document.querySelector('input[type="password"]');
-          if(pinInput && pinInput.value){
-            // Don't save PIN, just user - PIN will be auto-filled from known mapping on reload
-          }
-        }catch(_){}
-      }, 300);
-    }
-    // Clear on logout
-    if(txt==='logout' || txt.includes('logout') || txt.includes('log out')){
-      try{ localStorage.removeItem('optima_session_user'); }catch(_){}
-    }
-  });
-  // Auto-login on load if session exists and still on login screen
-  function tryAutoLogin(){
-    try{
-      const saved = localStorage.getItem('optima_session_user');
-      if(!saved || !PINS[saved]) return;
-      // Check if already logged in (app main visible)
-      const appVisible = document.body.innerText.includes('Dashboard') && !document.body.innerText.includes('Choose your name');
-      // Find login form: select with Ibrahim + password input + login button
-      const sels = Array.from(document.querySelectorAll('select'));
-      const userSel = sels.find(s=> Array.from(s.options).some(o=>o.text.includes('Ibrahim')));
-      const pinInput = document.querySelector('input[type="password"]');
-      const btns = Array.from(document.querySelectorAll('button'));
-      const loginBtn = btns.find(b=> b.textContent.trim().toLowerCase()==='login');
-      if(userSel && pinInput && loginBtn){
-        // Only auto-login if we are still on login screen (password empty and not logged in)
-        // Set user
-        userSel.value = saved;
-        userSel.dispatchEvent(new Event('change', {bubbles:true}));
-        // React needs native setter
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-        if(nativeInputValueSetter) nativeInputValueSetter.call(pinInput, PINS[saved]);
-        else pinInput.value = PINS[saved];
-        pinInput.dispatchEvent(new Event('input', {bubbles:true}));
-        pinInput.dispatchEvent(new Event('change', {bubbles:true}));
-        setTimeout(()=> loginBtn.click(), 300);
-      }
-    }catch(e){}
-  }
-  // Try multiple times because React renders async
-  window.addEventListener('load', ()=>{
-    setTimeout(tryAutoLogin, 800);
-    setTimeout(tryAutoLogin, 1800);
-    setTimeout(tryAutoLogin, 3000);
-  });
-  // Also try when DOM changes (React re-render)
-  const obs = new MutationObserver(()=>{ tryAutoLogin(); });
-  // Start observer after load
-  window.addEventListener('load', ()=>{ try{ obs.observe(document.body, {childList:true, subtree:true}); setTimeout(()=>obs.disconnect(), 8000); }catch(_){} });
-})();
+// OPTIMA - Keep login after refresh - DISABLED: old auto-login loop clicked Login on every DOM change
+// and logged in a deleted user (Sales 1) -> black empty screen. Login persistence is now handled
+// by the main app itself (optima_session_user_obj). This block does nothing on purpose.
+(function(){ try{ localStorage.removeItem('optima_session_user'); }catch(e){} })();
 </script>
 
 <script>
@@ -2469,7 +2432,7 @@ window.showPropertyDetail = function(id){
     overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;overflow-y:auto;padding:20px;";
     let imgs = u.images||[];
     let gallery = imgs.length ? imgs.map((im,i)=>'<img src="'+im+'" style="width:100%;max-height:380px;object-fit:cover;border-radius:12px;margin-bottom:10px;" />').join("") : '<div style="background:#242529;padding:40px;text-align:center;border-radius:12px;color:#999;">No photos yet</div>';
-    let thumbs = imgs.length ? imgs.map((im,i)=>'<img src="'+im+'" onclick="document.getElementById('opt-main-img').src=this.src" style="width:90px;height:70px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid #333;" />').join("") : '';
+    let thumbs = imgs.length ? imgs.map((im,i)=>'<img src="'+im+'" onclick=\"document.getElementById(\'opt-main-img\').src=this.src\"  style="width:90px;height:70px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid #333;" />').join("") : '';
     overlay.innerHTML = '<div style="max-width:700px;margin:0 auto;background:#121621;border-radius:16px;padding:20px;color:#fff;">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;"><h2 style="font-size:22px;font-weight:900;">'+(u.title||"")+'</h2><button onclick="document.getElementById(\'opt-prop-detail\').remove()" style="background:#fff;color:#000;border:0;padding:8px 16px;border-radius:8px;font-weight:900;cursor:pointer;">✕ Close</button></div>'
       + '<div style="margin-top:14px;"><img id="opt-main-img" src="'+(imgs[0]||"")+'" style="width:100%;max-height:380px;object-fit:cover;border-radius:12px;'+(imgs.length?'':'display:none')+'" />'+gallery.replace('<img src="'+(imgs[0]||"")+'"','')+'</div>'
