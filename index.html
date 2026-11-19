@@ -2467,6 +2467,324 @@ window.saveNewProperty = async function(){
   }catch(e){ alert("Error: "+e.message); }
 };
 </script>
+<script>
+/* OPTIMA - Attendance & Payroll (standalone module).
+   Isolated from the main app: if anything here fails, the CRM keeps working.
+   Data lives under its own Firebase root: /optima_hr (settings, salaries, attendance). */
+(function () {
+  'use strict';
+  var HR = 'https://optima-crm-6b76d-default-rtdb.firebaseio.com/optima_hr';
+  // Who may see ALL employees / edit. Everyone else sees only their own page.
+  var VIEW_ALL_ROLES = ['Admin', 'Accountant'];
+  var EDIT_ROLES = ['Admin', 'Accountant'];
+
+  var DEFAULTS = {
+    workStart: '09:00', graceMin: 0, weekend: [5, 6], daysDivisor: 30,
+    lateTiers: [{ min: 30, days: 0.25 }, { min: 60, days: 0.5 }, { min: 120, days: 1 }],
+    exemption: 20000, siRate: 0.11, siMin: 2700, siMax: 16700,
+    brackets: [
+      { upTo: 40000, rate: 0 }, { upTo: 55000, rate: 0.10 }, { upTo: 70000, rate: 0.15 },
+      { upTo: 200000, rate: 0.20 }, { upTo: 400000, rate: 0.225 }, { upTo: 1200000, rate: 0.25 },
+      { upTo: null, rate: 0.275 }
+    ],
+    holidays: {}
+  };
+
+  /* ---------- pure calculation helpers (also unit-tested in node) ---------- */
+  function round2(x) { return Math.round((x + Number.EPSILON) * 100) / 100; }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function cairoParts(ts) {
+    var f = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    var o = {}; f.formatToParts(new Date(ts)).forEach(function (p) { o[p.type] = p.value; });
+    var h = parseInt(o.hour, 10) % 24, mi = parseInt(o.minute, 10);
+    var y = parseInt(o.year, 10), mo = parseInt(o.month, 10), d = parseInt(o.day, 10);
+    return { date: y + '-' + pad(mo) + '-' + pad(d), hm: pad(h) + ':' + pad(mi), min: h * 60 + mi, dow: new Date(Date.UTC(y, mo - 1, d)).getUTCDay() };
+  }
+  function hmToMin(hm) { var p = String(hm || '').split(':'); if (p.length < 2) return null; var h = parseInt(p[0], 10), m = parseInt(p[1], 10); return isNaN(h) || isNaN(m) ? null : h * 60 + m; }
+  function annualTax(taxable, brackets) {
+    var tax = 0, prev = 0;
+    for (var i = 0; i < brackets.length; i++) {
+      var top = brackets[i].upTo == null ? Infinity : brackets[i].upTo;
+      if (taxable > prev) tax += (Math.min(taxable, top) - prev) * brackets[i].rate;
+      prev = top; if (taxable <= top) break;
+    }
+    return tax;
+  }
+  function fromGross(G, st) {
+    var ins = Math.min(Math.max(G, st.siMin), st.siMax), si = ins * st.siRate;
+    var taxable = Math.max(0, G * 12 - si * 12 - st.exemption);
+    var tax = annualTax(taxable, st.brackets) / 12;
+    return { si: si, tax: tax, net: G - si - tax };
+  }
+  function grossFromNet(N, st) {
+    if (!(N > 0)) return { gross: 0, si: 0, tax: 0 };
+    var lo = N, hi = N * 4 + 10000;
+    for (var i = 0; i < 100; i++) { var mid = (lo + hi) / 2; if (fromGross(mid, st).net < N) lo = mid; else hi = mid; }
+    var g = (lo + hi) / 2, r = fromGross(g, st);
+    return { gross: round2(g), si: round2(r.si), tax: round2(r.tax) };
+  }
+  function tierDays(lateMin, tiers) {
+    var d = 0, sorted = tiers.slice().sort(function (a, b) { return a.min - b.min; });
+    for (var i = 0; i < sorted.length; i++) if (lateMin >= sorted[i].min) d = sorted[i].days;
+    return d;
+  }
+  function getIn(rec) { if (!rec) return null; if (rec.in) return rec.in; if (rec.inTs) return cairoParts(rec.inTs).hm; return null; }
+  function getOut(rec) { if (!rec) return null; if (rec.out) return rec.out; if (rec.outTs) return cairoParts(rec.outTs).hm; return null; }
+  function calcMonth(net, month, recs, st, today) {
+    recs = recs || {};
+    var y = parseInt(month.slice(0, 4), 10), m = parseInt(month.slice(5, 7), 10), dim = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    var startMin = hmToMin(st.workStart); if (startMin == null) startMin = 540;
+    var out = { rows: [], present: 0, lateCount: 0, lateMinutes: 0, absent: 0, leave: 0, lateDays: 0 };
+    for (var d = 1; d <= dim; d++) {
+      var date = month + '-' + pad(d), dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(), rec = recs[date] || null;
+      var row = { date: date, dow: dow, type: '', lateMin: 0, lateDays: 0, in: getIn(rec), out: getOut(rec), note: rec && rec.note || '', rec: rec };
+      if (date > today.date) row.type = 'future';
+      else if (st.weekend.indexOf(dow) >= 0) row.type = 'weekend';
+      else if (st.holidays && st.holidays[date] != null) row.type = 'holiday';
+      else if (rec && rec.status === 'leave') { row.type = 'leave'; out.leave++; }
+      else if (rec && rec.status === 'absent') { row.type = 'absent'; out.absent++; }
+      else if (row.in || (rec && rec.status === 'present')) {
+        row.type = 'present'; out.present++;
+        var inMin = hmToMin(row.in);
+        if (inMin != null) {
+          row.lateMin = Math.max(0, inMin - startMin - (st.graceMin || 0));
+          row.lateDays = tierDays(row.lateMin, st.lateTiers);
+          if (row.lateDays > 0) { out.lateCount++; out.lateMinutes += row.lateMin; out.lateDays += row.lateDays; row.type = 'late'; }
+        }
+      }
+      else if (date === today.date) row.type = 'pending';
+      else { row.type = 'absent'; out.absent++; row.auto = true; }
+      out.rows.push(row);
+    }
+    var divisor = st.daysDivisor || 30;
+    out.deductDays = Math.min(divisor, out.absent + out.lateDays);
+    out.dailyNet = round2(net / divisor);
+    out.deduction = round2(out.deductDays * net / divisor);
+    out.finalNet = Math.max(0, round2(net - out.deduction));
+    var gb = grossFromNet(net, st); out.gross = gb.gross; out.si = gb.si; out.tax = gb.tax;
+    return out;
+  }
+  function mergeSettings(raw) {
+    var s = JSON.parse(JSON.stringify(DEFAULTS)); raw = raw || {};
+    ['workStart', 'graceMin', 'daysDivisor', 'exemption', 'siRate', 'siMin', 'siMax'].forEach(function (k) { if (raw[k] != null && raw[k] !== '') s[k] = (k === 'workStart') ? String(raw[k]) : Number(raw[k]); });
+    function arr(x) { return Array.isArray(x) ? x.filter(Boolean) : (x && typeof x === 'object' ? Object.keys(x).sort(function (a, b) { return a - b; }).map(function (k) { return x[k]; }) : []); }
+    var wk = arr(raw.weekend); if (raw.weekend != null && wk.length >= 0 && raw.weekend !== '') s.weekend = wk.map(Number);
+    var lt = arr(raw.lateTiers); if (lt.length) s.lateTiers = lt.map(function (t) { return { min: Number(t.min), days: Number(t.days) }; });
+    var br = arr(raw.brackets); if (br.length) s.brackets = br.map(function (b) { return { upTo: b.upTo == null || b.upTo === '' ? null : Number(b.upTo), rate: Number(b.rate) }; });
+    if (raw.holidays && typeof raw.holidays === 'object') s.holidays = raw.holidays;
+    return s;
+  }
+  window.__OptimaHRCalc = { calcMonth: calcMonth, grossFromNet: grossFromNet, fromGross: fromGross, annualTax: annualTax, tierDays: tierDays, mergeSettings: mergeSettings, DEFAULTS: DEFAULTS, cairoParts: cairoParts };
+  if (typeof document === 'undefined') return; // node test harness stops here
+
+  /* ---------------------------- UI / cloud ---------------------------- */
+  var S = { open: false, lang: null, month: null, uid: null, me: null, users: [], salaries: {}, settings: mergeSettings(), recs: {}, summary: {}, error: '', busy: false, showSettings: false };
+  function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function safeKey(v) { return String(v).replace(/[.#$\[\]\/]/g, '_'); }
+  function isAr() { if (S.lang) return S.lang === 'ar'; return !!document.querySelector('[dir="rtl"]'); }
+  function T(en, ar) { return isAr() ? ar : en; }
+  function money(x) { return Number(x || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function session() { try { var s = JSON.parse(localStorage.getItem('optima_session_user_obj') || 'null'); return s && s.id ? s : null; } catch (e) { return null; } }
+  function canViewAll() { return !!S.me && VIEW_ALL_ROLES.indexOf(S.me.role) >= 0; }
+  function canEdit() { return !!S.me && EDIT_ROLES.indexOf(S.me.role) >= 0; }
+
+  async function jreq(url, method, body) {
+    var res = await fetch(url, { method: method || 'GET', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? T('Firebase rules do not allow the optima_hr path yet. Allow read/write on it in Firebase > Realtime Database > Rules.', 'قواعد Firebase مش سامحة بمسار optima_hr. اسمح بالقراءة والكتابة عليه من Rules.') : 'Firebase ' + res.status);
+    return res.json();
+  }
+  function userUrl(uid, tail) { return HR + '/' + tail + '/' + encodeURIComponent(safeKey(uid)); }
+  async function fetchMonth(uid, month) {
+    var q = '?orderBy=' + encodeURIComponent('"$key"') + '&startAt=' + encodeURIComponent('"' + month + '"') + '&endAt=' + encodeURIComponent('"' + month + '\uf8ff"');
+    return (await jreq(HR + '/attendance/' + encodeURIComponent(safeKey(uid)) + '.json' + q)) || {};
+  }
+  function todayParts() { return cairoParts(Date.now()); }
+
+  async function loadAll() {
+    S.busy = true; S.error = ''; render();
+    try {
+      var sess = session(); if (!sess) { close(); return; }
+      var rows = (window.OptimaCloud ? await window.OptimaCloud.get('users') : []).map(function (r) { return r.data || r; });
+      S.users = rows.filter(function (u) { return u && u.id && u.status !== 'Inactive'; });
+      var cloudMe = rows.find(function (u) { return String(u.id) === String(sess.id); });
+      S.me = { id: sess.id, name: (cloudMe || sess).name, role: (cloudMe || sess).role };
+      if (!S.month) S.month = todayParts().date.slice(0, 7);
+      if (!canViewAll() || !S.uid) S.uid = canViewAll() ? (S.uid || S.me.id) : S.me.id;
+      S.settings = mergeSettings(await jreq(HR + '/settings.json'));
+      if (canViewAll()) {
+        S.salaries = (await jreq(HR + '/salaries.json')) || {};
+        var list = S.users.slice(), res = await Promise.all(list.map(function (u) { return fetchMonth(u.id, S.month).catch(function () { return {}; }); }));
+        S.summary = {}; list.forEach(function (u, i) { S.recs[u.id] = res[i]; });
+      } else {
+        S.salaries = {}; S.salaries[safeKey(S.me.id)] = await jreq(userUrl(S.me.id, 'salaries') + '.json');
+        S.recs[S.me.id] = await fetchMonth(S.me.id, S.month);
+      }
+    } catch (e) { S.error = e.message || String(e); }
+    S.busy = false; render();
+  }
+  async function loadUserMonth(uid) {
+    try { S.recs[uid] = await fetchMonth(uid, S.month); } catch (e) { S.error = e.message; }
+  }
+  function netOf(uid) { var s = S.salaries && S.salaries[safeKey(uid)]; return s && s.net != null ? Number(s.net) : 0; }
+  function calcFor(uid) { return calcMonth(netOf(uid), S.month, S.recs[uid] || {}, S.settings, todayParts()); }
+
+  async function checkIn() {
+    try {
+      var t = todayParts(), url = userUrl(S.me.id, 'attendance') + '/' + t.date + '.json';
+      var cur = await jreq(url);
+      if (cur && (cur.inTs || cur.in)) { alert(T('You already checked in today.', 'سجّلت حضورك النهارده بالفعل.')); return; }
+      await jreq(url, 'PATCH', { inTs: { '.sv': 'timestamp' }, status: null, in: null, src: 'self' });
+      await loadUserMonth(S.me.id); render();
+    } catch (e) { S.error = e.message; render(); }
+  }
+  async function checkOut() {
+    try {
+      var t = todayParts(), url = userUrl(S.me.id, 'attendance') + '/' + t.date + '.json';
+      var cur = await jreq(url);
+      if (!cur || !(cur.inTs || cur.in)) { alert(T('Check in first.', 'سجّل الحضور الأول.')); return; }
+      await jreq(url, 'PATCH', { outTs: { '.sv': 'timestamp' } });
+      await loadUserMonth(S.me.id); render();
+    } catch (e) { S.error = e.message; render(); }
+  }
+
+  /* ------------------------------ rendering ------------------------------ */
+  var CSS = '#opt-hr-btn{position:fixed;left:12px;bottom:12px;z-index:9998;background:#fff;color:#000;border:0;border-radius:999px;padding:10px 16px;font-weight:800;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.4)}' +
+    '#opt-hr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:10000;overflow-y:auto;padding:16px;font-family:inherit;color:#fff}' +
+    '#opt-hr-overlay .hrp{max-width:1000px;margin:0 auto;background:#121621;border-radius:16px;padding:18px}' +
+    '#opt-hr-overlay .hrc{background:#242529;border:1px solid #3D3E40;border-radius:12px;padding:12px}' +
+    '#opt-hr-overlay .hrg{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}' +
+    '#opt-hr-overlay .hrk{font-size:11px;color:#aaa}#opt-hr-overlay .hrv{font-size:18px;font-weight:900;margin-top:2px}' +
+    '#opt-hr-overlay input,#opt-hr-overlay select,#opt-hr-overlay textarea{background:#252A37;color:#fff;border:1px solid #3D3E40;border-radius:8px;padding:8px;font-size:13px;max-width:100%}' +
+    '#opt-hr-overlay button.hrb{background:#fff;color:#000;border:0;border-radius:8px;padding:8px 14px;font-weight:800;cursor:pointer;font-size:13px}' +
+    '#opt-hr-overlay button.hrb.g{background:#3D3E40;color:#fff}#opt-hr-overlay button:disabled{opacity:.4}' +
+    '#opt-hr-overlay table{width:100%;border-collapse:collapse;font-size:13px}#opt-hr-overlay th{text-align:start;color:#ccc;padding:8px}' +
+    '#opt-hr-overlay td{padding:8px;border-top:1px solid #3D3E40}#opt-hr-overlay .bd{display:inline-block;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:800}' +
+    '#opt-hr-overlay .scroll{overflow-x:auto}#opt-hr-overlay h3{font-weight:900;margin:16px 0 6px}';
+  var BADGE = { present: ['#10B981', 'Present', 'حاضر'], late: ['#F59E0B', 'Late', 'متأخر'], absent: ['#EF4444', 'Absent', 'غائب'], leave: ['#3B82F6', 'Leave', 'إجازة'], holiday: ['#8B5CF6', 'Holiday', 'عطلة رسمية'], weekend: ['#6B7280', 'Weekend', 'إجازة أسبوعية'], pending: ['#6B7280', 'Today', 'النهارده'], future: ['#374151', '', ''] };
+  var DOW_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], DOW_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+  function badge(t) { var b = BADGE[t]; if (!b || !b[1]) return ''; return '<span class="bd" style="background:' + b[0] + '">' + esc(isAr() ? b[2] : b[1]) + '</span>'; }
+  function card(k, v) { return '<div class="hrc"><div class="hrk">' + esc(k) + '</div><div class="hrv">' + v + '</div></div>'; }
+
+  function render() {
+    var ov = document.getElementById('opt-hr-overlay'); if (!S.open) { if (ov) ov.remove(); return; }
+    if (!ov) { ov = document.createElement('div'); ov.id = 'opt-hr-overlay'; document.body.appendChild(ov); ov.addEventListener('click', onClick); ov.addEventListener('change', onChange); }
+    ov.setAttribute('dir', isAr() ? 'rtl' : 'ltr');
+    var h = '<div class="hrp"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="font-size:22px;font-weight:900">🕒 ' + esc(T('Attendance & Payroll', 'الحضور والمرتبات')) + '</h2><div style="display:flex;gap:8px"><button class="hrb g" data-a="lang">' + (isAr() ? 'EN' : 'ع') + '</button><button class="hrb" data-a="close">✕ ' + esc(T('Close', 'إغلاق')) + '</button></div></div>';
+    if (S.error) h += '<div class="hrc" style="margin-top:10px;border-color:#EF4444">⚠ ' + esc(S.error) + '</div>';
+    if (S.busy || !S.me) { h += '<p style="margin-top:14px">' + esc(T('Loading…', 'جاري التحميل…')) + '</p></div>'; ov.innerHTML = h; return; }
+    var t = todayParts(), mine = (S.recs[S.me.id] || {})[t.date], inH = getIn(mine), outH = getOut(mine);
+    h += '<div class="hrc" style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><div><div style="font-weight:900">' + esc(S.me.name) + ' — ' + esc(t.date) + '</div><div class="hrk">' + esc(inH ? T('Checked in at ', 'حضور الساعة ') + inH : T('Not checked in yet', 'لسه ما سجّلتش حضور')) + (outH ? ' · ' + esc(T('out ', 'انصراف ')) + outH : '') + '</div></div><div style="display:flex;gap:8px"><button class="hrb" data-a="in"' + (inH ? ' disabled' : '') + '>' + esc(T('Check in', 'تسجيل حضور')) + '</button><button class="hrb g" data-a="out"' + (!inH || outH ? ' disabled' : '') + '>' + esc(T('Check out', 'تسجيل انصراف')) + '</button></div></div>';
+    h += '<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label class="hrk">' + esc(T('Month', 'الشهر')) + ' <input type="month" id="hr-month" value="' + esc(S.month) + '"></label>';
+    if (canViewAll()) {
+      h += '<label class="hrk">' + esc(T('Employee', 'الموظف')) + ' <select id="hr-user">' + S.users.map(function (u) { return '<option value="' + esc(u.id) + '"' + (String(u.id) === String(S.uid) ? ' selected' : '') + '>' + esc(u.name) + '</option>'; }).join('') + '</select></label>';
+      if (canEdit()) h += '<button class="hrb g" data-a="settings">⚙ ' + esc(T('Settings', 'الإعدادات')) + '</button>';
+    }
+    h += '</div>';
+    if (canViewAll()) {
+      h += '<h3>' + esc(T('All employees — ', 'كل الموظفين — ')) + esc(S.month) + '</h3><div class="hrc scroll"><table><thead><tr><th>' + esc(T('Employee', 'الموظف')) + '</th><th>' + esc(T('Net salary', 'الصافي')) + '</th><th>' + esc(T('Present', 'حضور')) + '</th><th>' + esc(T('Late min', 'دقائق تأخير')) + '</th><th>' + esc(T('Absent', 'غياب')) + '</th><th>' + esc(T('Deduct days', 'أيام خصم')) + '</th><th>' + esc(T('Final net', 'الصافي النهائي')) + '</th></tr></thead><tbody>';
+      var tot = 0;
+      S.users.forEach(function (u) { var c = calcFor(u.id); tot += netOf(u.id) ? c.finalNet : 0; h += '<tr data-a="pick" data-uid="' + esc(u.id) + '" style="cursor:pointer' + (String(u.id) === String(S.uid) ? ';background:#1b2030' : '') + '"><td><b>' + esc(u.name) + '</b></td><td>' + (netOf(u.id) ? money(netOf(u.id)) : '—') + '</td><td>' + c.present + '</td><td>' + c.lateMinutes + '</td><td>' + c.absent + '</td><td>' + c.deductDays + '</td><td><b>' + (netOf(u.id) ? money(c.finalNet) : '—') + '</b></td></tr>'; });
+      h += '</tbody><tfoot><tr><td colspan="6" style="text-align:end"><b>' + esc(T('Total payroll', 'إجمالي المرتبات')) + '</b></td><td><b>' + money(tot) + '</b></td></tr></tfoot></table></div>';
+    }
+    var uid = S.uid || S.me.id, u = S.users.find(function (x) { return String(x.id) === String(uid); }) || S.me, c = calcFor(uid), net = netOf(uid);
+    h += '<h3>' + esc(u.name) + ' — ' + esc(S.month) + '</h3>';
+    if (canEdit()) h += '<div class="hrc" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="hrk">' + esc(T('Net monthly salary (take-home, EGP)', 'المرتب الصافي الشهري (جنيه)')) + ' <input type="number" id="hr-net" value="' + (net || '') + '" style="width:150px"></label><button class="hrb" data-a="savenet">' + esc(T('Save salary', 'حفظ المرتب')) + '</button></div>';
+    if (!net) h += '<p class="hrk" style="margin-top:8px">' + esc(T('No salary set for this employee yet.', 'مفيش مرتب متسجّل للموظف ده لسه.')) + '</p>';
+    h += '<div class="hrg">' + card(T('Net salary', 'المرتب الصافي'), money(net)) + card(T('Present days', 'أيام الحضور'), c.present) + card(T('Late (times / min)', 'التأخير (مرات / دقائق)'), c.lateCount + ' / ' + c.lateMinutes) + card(T('Absent days', 'أيام الغياب'), c.absent) + card(T('Leave days', 'أيام الإجازة'), c.leave) + card(T('Deducted days', 'أيام الخصم'), c.deductDays) + card(T('Deduction (EGP)', 'قيمة الخصم'), '−' + money(c.deduction)) + card(T('Final net pay', 'الصافي النهائي'), '<span style="color:#10B981">' + money(c.finalNet) + '</span>') + '</div>';
+    h += '<div class="hrc" style="margin-top:10px"><div class="hrk">' + esc(T('Estimated breakdown of the contract salary (derived from the net figure)', 'تفصيل تقديري للمرتب التعاقدي (مُستنتج من الصافي)')) + '</div><div style="margin-top:6px;font-size:13px">' + esc(T('Gross', 'الإجمالي')) + ': <b>' + money(c.gross) + '</b> · ' + esc(T('Social insurance', 'التأمينات')) + ' (' + (S.settings.siRate * 100) + '%): <b>' + money(c.si) + '</b> · ' + esc(T('Income tax', 'ضريبة الدخل')) + ': <b>' + money(c.tax) + '</b> · ' + esc(T('Daily value', 'قيمة اليوم')) + ': <b>' + money(c.dailyNet) + '</b></div></div>';
+    h += '<h3>' + esc(T('Daily log', 'سجل الأيام')) + '</h3><div class="hrc scroll"><table><thead><tr><th>' + esc(T('Date', 'التاريخ')) + '</th><th>' + esc(T('Status', 'الحالة')) + '</th><th>' + esc(T('In', 'حضور')) + '</th><th>' + esc(T('Out', 'انصراف')) + '</th><th>' + esc(T('Late min', 'تأخير')) + '</th><th>' + esc(T('Note', 'ملاحظة')) + '</th>' + (canEdit() ? '<th></th>' : '') + '</tr></thead><tbody>';
+    c.rows.forEach(function (r) {
+      if (r.type === 'future') return;
+      h += '<tr><td>' + esc(r.date) + ' <span class="hrk">' + esc(isAr() ? DOW_AR[r.dow] : DOW_EN[r.dow]) + '</span></td><td>' + badge(r.type) + (r.auto ? ' <span class="hrk">' + esc(T('auto', 'تلقائي')) + '</span>' : '') + (r.rec && r.rec.inTs && cairoParts(r.rec.inTs).date !== r.date ? ' <span title="clock mismatch">⚠</span>' : '') + '</td><td>' + esc(r.in || '—') + '</td><td>' + esc(r.out || '—') + '</td><td>' + (r.lateMin || '') + '</td><td>' + esc(r.note || (S.settings.holidays && S.settings.holidays[r.date]) || '') + '</td>' + (canEdit() ? '<td><button class="hrb g" data-a="editday" data-date="' + esc(r.date) + '">✎</button></td>' : '') + '</tr>';
+    });
+    h += '</tbody></table></div>';
+    if (canEdit() && S.showSettings) h += settingsHtml();
+    h += '<p class="hrk" style="margin-top:12px">' + esc(T('Figures are estimates for internal use; confirm tax and insurance with your accountant.', 'الأرقام تقديرية للاستخدام الداخلي؛ راجع الضرائب والتأمينات مع المحاسب.')) + '</p></div>';
+    ov.innerHTML = h;
+  }
+  function settingsHtml() {
+    var s = S.settings, days = [0, 1, 2, 3, 4, 5, 6].map(function (d) { return '<label style="margin-inline-end:8px"><input type="checkbox" class="hr-wk" value="' + d + '"' + (s.weekend.indexOf(d) >= 0 ? ' checked' : '') + '> ' + esc(isAr() ? DOW_AR[d] : DOW_EN[d]) + '</label>'; }).join('');
+    var tiers = s.lateTiers.map(function (x) { return x.min + ',' + x.days; }).join('\n');
+    var br = s.brackets.map(function (b) { return (b.upTo == null ? '*' : b.upTo) + ',' + (Math.round(b.rate * 10000) / 100); }).join('\n');
+    var hol = Object.keys(s.holidays || {}).sort().map(function (d) { return d + ',' + (s.holidays[d] || ''); }).join('\n');
+    return '<h3>⚙ ' + esc(T('Settings', 'الإعدادات')) + '</h3><div class="hrc" style="display:grid;gap:10px">' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap"><label class="hrk">' + esc(T('Work start', 'بداية الشغل')) + '<br><input type="time" id="hs-start" value="' + esc(s.workStart) + '"></label><label class="hrk">' + esc(T('Grace (min)', 'سماح (دقيقة)')) + '<br><input type="number" id="hs-grace" value="' + s.graceMin + '" style="width:90px"></label><label class="hrk">' + esc(T('Days per month (for daily value)', 'عدد أيام الشهر (لقيمة اليوم)')) + '<br><input type="number" id="hs-div" value="' + s.daysDivisor + '" style="width:90px"></label></div>' +
+      '<div class="hrk">' + esc(T('Weekend days', 'أيام الإجازة الأسبوعية')) + '<br>' + days + '</div>' +
+      '<label class="hrk">' + esc(T('Late tiers: "minutes late,days deducted" per line', 'شرايح التأخير: "دقائق التأخير,أيام الخصم" في كل سطر')) + '<br><textarea id="hs-tiers" rows="3" style="width:100%">' + esc(tiers) + '</textarea></label>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap"><label class="hrk">' + esc(T('Personal exemption (yearly)', 'الإعفاء الشخصي (سنوي)')) + '<br><input type="number" id="hs-ex" value="' + s.exemption + '" style="width:130px"></label><label class="hrk">' + esc(T('Employee insurance %', 'نسبة تأمينات الموظف %')) + '<br><input type="number" step="0.01" id="hs-si" value="' + Math.round(s.siRate * 10000) / 100 + '" style="width:100px"></label><label class="hrk">' + esc(T('Insurable wage min', 'أدنى أجر تأميني')) + '<br><input type="number" id="hs-simin" value="' + s.siMin + '" style="width:110px"></label><label class="hrk">' + esc(T('Insurable wage max', 'أقصى أجر تأميني')) + '<br><input type="number" id="hs-simax" value="' + s.siMax + '" style="width:110px"></label></div>' +
+      '<label class="hrk">' + esc(T('Tax brackets (yearly taxable income after exemption): "up to,rate %" per line, * = no limit', 'شرايح الضريبة (الدخل السنوي بعد الإعفاء): "حتى,النسبة %" في كل سطر، * = بلا حد')) + '<br><textarea id="hs-br" rows="7" style="width:100%">' + esc(br) + '</textarea></label>' +
+      '<label class="hrk">' + esc(T('Official holidays: "YYYY-MM-DD,name" per line', 'العطلات الرسمية: "YYYY-MM-DD,الاسم" في كل سطر')) + '<br><textarea id="hs-hol" rows="3" style="width:100%">' + esc(hol) + '</textarea></label>' +
+      '<div><button class="hrb" data-a="savesettings">' + esc(T('Save settings', 'حفظ الإعدادات')) + '</button></div></div>';
+  }
+
+  /* ------------------------------ events ------------------------------ */
+  function val(id) { var e = document.getElementById(id); return e ? e.value : ''; }
+  async function onClick(ev) {
+    var el = ev.target.closest('[data-a]'); if (!el) return; var a = el.getAttribute('data-a');
+    try {
+      if (a === 'close') return close();
+      if (a === 'lang') { S.lang = isAr() ? 'en' : 'ar'; return render(); }
+      if (a === 'in') return checkIn();
+      if (a === 'out') return checkOut();
+      if (a === 'settings') { S.showSettings = !S.showSettings; return render(); }
+      if (a === 'pick') { S.uid = el.getAttribute('data-uid'); return render(); }
+      if (a === 'savenet' && canEdit()) {
+        var n = Number(val('hr-net')); if (!(n >= 0)) { alert(T('Enter a valid number', 'اكتب رقم صحيح')); return; }
+        await jreq(userUrl(S.uid, 'salaries') + '.json', 'PUT', { net: n, by: S.me.name, at: Date.now() });
+        S.salaries[safeKey(S.uid)] = { net: n }; return render();
+      }
+      if (a === 'savesettings' && canEdit()) {
+        var wk = Array.prototype.map.call(document.querySelectorAll('.hr-wk:checked'), function (x) { return Number(x.value); });
+        var tiers = val('hs-tiers').split('\n').map(function (l) { var p = l.split(','); return { min: Number(p[0]), days: Number(p[1]) }; }).filter(function (x) { return !isNaN(x.min) && !isNaN(x.days) && x.min >= 0; });
+        var brs = val('hs-br').split('\n').map(function (l) { var p = l.split(','); return { upTo: (p[0] || '').trim() === '*' || (p[0] || '').trim() === '' ? null : Number(p[0]), rate: Number(p[1]) / 100 }; }).filter(function (x) { return !isNaN(x.rate); });
+        if (!brs.length || brs[brs.length - 1].upTo !== null) { alert(T('The last tax bracket must be "*,rate".', 'آخر شريحة ضريبة لازم تكون "*,النسبة".')); return; }
+        var hol = {}; val('hs-hol').split('\n').forEach(function (l) { var p = l.split(','); var d = (p[0] || '').trim(); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) hol[d] = (p.slice(1).join(',') || '').trim() || 'Holiday'; });
+        var payload = { workStart: val('hs-start') || '09:00', graceMin: Number(val('hs-grace')) || 0, daysDivisor: Number(val('hs-div')) || 30, weekend: wk, lateTiers: tiers, exemption: Number(val('hs-ex')) || 0, siRate: (Number(val('hs-si')) || 0) / 100, siMin: Number(val('hs-simin')) || 0, siMax: Number(val('hs-simax')) || 0, brackets: brs, holidays: hol, by: S.me.name, at: Date.now() };
+        await jreq(HR + '/settings.json', 'PUT', payload);
+        S.settings = mergeSettings(payload); S.showSettings = false; return render();
+      }
+      if (a === 'editday' && canEdit()) return editDay(el.getAttribute('data-date'));
+    } catch (e) { S.error = e.message || String(e); render(); }
+  }
+  async function onChange(ev) {
+    var id = ev.target.id;
+    if (id === 'hr-month' && ev.target.value) { S.month = ev.target.value; return loadAll(); }
+    if (id === 'hr-user') { S.uid = ev.target.value; return render(); }
+  }
+  function editDay(date) {
+    var uid = S.uid, rec = (S.recs[uid] || {})[date] || {}, st = rec.status || (getIn(rec) ? 'present' : 'auto');
+    var d = document.createElement('div'); d.id = 'opt-hr-edit'; d.setAttribute('dir', isAr() ? 'rtl' : 'ltr');
+    d.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:16px';
+    d.innerHTML = '<div class="hrc" style="background:#121621;max-width:380px;width:100%;color:#fff"><div style="font-weight:900;margin-bottom:8px">' + esc(date) + '</div><div style="display:grid;gap:8px"><label class="hrk">' + esc(T('Status', 'الحالة')) + '<br><select id="ed-st" style="width:100%"><option value="auto"' + (st === 'auto' ? ' selected' : '') + '>' + esc(T('Auto (from check-in)', 'تلقائي (من التسجيل)')) + '</option><option value="present"' + (st === 'present' ? ' selected' : '') + '>' + esc(T('Present', 'حاضر')) + '</option><option value="absent"' + (st === 'absent' ? ' selected' : '') + '>' + esc(T('Absent', 'غائب')) + '</option><option value="leave"' + (st === 'leave' ? ' selected' : '') + '>' + esc(T('Approved leave (no deduction)', 'إجازة معتمدة (بدون خصم)')) + '</option></select></label><label class="hrk">' + esc(T('Check-in time', 'وقت الحضور')) + '<br><input type="time" id="ed-in" value="' + esc(getIn(rec) || '') + '" style="width:100%"></label><label class="hrk">' + esc(T('Check-out time', 'وقت الانصراف')) + '<br><input type="time" id="ed-out" value="' + esc(getOut(rec) || '') + '" style="width:100%"></label><label class="hrk">' + esc(T('Note', 'ملاحظة')) + '<br><input id="ed-note" value="' + esc(rec.note || '') + '" style="width:100%"></label></div><div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="hrb g" id="ed-cancel">' + esc(T('Cancel', 'إلغاء')) + '</button><button class="hrb" id="ed-save">' + esc(T('Save', 'حفظ')) + '</button></div></div>';
+    document.body.appendChild(d);
+    d.querySelector('#ed-cancel').onclick = function () { d.remove(); };
+    d.querySelector('#ed-save').onclick = async function () {
+      try {
+        var s = d.querySelector('#ed-st').value, inV = d.querySelector('#ed-in').value, outV = d.querySelector('#ed-out').value, note = d.querySelector('#ed-note').value.trim();
+        var url = userUrl(uid, 'attendance') + '/' + date + '.json';
+        if (s === 'auto' && !inV && !outV && !note) await jreq(url, 'DELETE');
+        else await jreq(url, 'PUT', { status: s === 'auto' ? null : s, in: inV || null, out: outV || null, inTs: inV ? null : (rec.inTs || null), outTs: outV ? null : (rec.outTs || null), note: note || null, src: 'admin', by: S.me.name });
+        d.remove(); await loadUserMonth(uid); render();
+      } catch (e) { S.error = e.message || String(e); d.remove(); render(); }
+    };
+  }
+
+  function open() { S.open = true; S.month = null; loadAll(); }
+  function close() { S.open = false; var ov = document.getElementById('opt-hr-overlay'); if (ov) ov.remove(); var ed = document.getElementById('opt-hr-edit'); if (ed) ed.remove(); }
+  function ensureButton() {
+    try {
+      var has = document.getElementById('opt-hr-btn'), sess = session();
+      if (sess && !has) {
+        if (!document.getElementById('opt-hr-css')) { var st = document.createElement('style'); st.id = 'opt-hr-css'; st.textContent = CSS; document.head.appendChild(st); }
+        var b = document.createElement('button'); b.id = 'opt-hr-btn'; b.type = 'button'; b.textContent = '🕒 ' + T('Attendance', 'الحضور'); b.onclick = open; document.body.appendChild(b);
+      } else if (!sess) { if (has) has.remove(); if (S.open) close(); S.me = null; S.recs = {}; S.salaries = {}; }
+      else if (has) has.textContent = '🕒 ' + T('Attendance', 'الحضور');
+    } catch (e) { /* never break the CRM */ }
+  }
+  setInterval(ensureButton, 1500);
+})();
+
+</script>
 </body>
 
 
